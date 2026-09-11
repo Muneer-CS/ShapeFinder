@@ -1,10 +1,25 @@
 from collections.abc import Sequence
-from typing import Protocol
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import Protocol, TypeAlias
 
-from shape_finder.core.market_data import PriceBar
+PriceValue: TypeAlias = Decimal | float | int
+
+
+@dataclass(frozen=True, slots=True)
+class SimilarityScore:
+    """Interpretable, bounded components of one deterministic comparison."""
+
+    overall_score: float
+    shape_score: float
+    direction_score: float
+    error_score: float
+    amplitude_score: float
 
 
 class SimilarityEngine(Protocol):
-    """Future isolated numerical engine; no implementation exists in Phase 1."""
+    """Provider- and transport-independent close-price comparison boundary."""
 
-    def compare(self, reference: Sequence[PriceBar], candidate: Sequence[PriceBar]) -> float: ...
+    def compare(
+        self, reference: Sequence[PriceValue], candidate: Sequence[PriceValue]
+    ) -> SimilarityScore: ...

@@ -2,9 +2,9 @@
 
 ShapeFinder is the foundation for a stock-chart similarity application. The future product will compare normalized chart behaviour across securities and historical periods; it is not a forecasting or trading-recommendation tool.
 
-## Current scope: Phase 4
+## Current scope: Phase 5
 
-ShapeFinder now provides a polished reference-chart workflow on top of the local normalized market database and provider abstraction. A user can choose a ticker, reference period, future search boundary, and interval, then load an exact closing-price chart from the existing API. Reference dates define the chart being studied; search dates are retained separately for the later matching phase and are not sent to the market-data endpoint. ShapeFinder still does **not** scan history, calculate similarity, show match scores, predict prices, or make recommendations.
+ShapeFinder now includes Similarity Engine V1, a pure analysis component that compares two explicitly supplied close-price series and returns an interpretable 0–100 score. The Phase 4 reference-chart workflow remains unchanged. ShapeFinder still does **not** scan the market, rank real historical matches, display similarity results, predict prices, or make recommendations.
 
 ## Architecture
 
@@ -16,11 +16,13 @@ backend API routes
 application services
         ├── market-data repository protocol → SQLite
         ├── market-data provider protocol → Twelve Data
-        ├── similarity engine protocol
+        ├── chart similarity engine → deterministic close-price analysis
         └── repository protocol
 ```
 
 The core layer contains provider-neutral domain types. `MarketDataService` coordinates `MarketDataRepository` and `MarketDataProvider`; it does not import SQLite or Twelve Data. This keeps both the data vendor and database replaceable, including a later migration to PostgreSQL.
+
+`ChartSimilarityEngine` implements the core `SimilarityEngine` protocol without importing FastAPI, SQLite, Twelve Data, React, or HTTP. It accepts two close-price sequences and returns the overall score plus shape, direction, fitted-error, and amplitude components. See [the architecture notes](docs/architecture.md#similarity-engine-v1) for the exact formula and policies.
 
 ## Project layout
 

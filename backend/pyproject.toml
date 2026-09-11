@@ -32,7 +32,7 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 # Protocol-only boundary modules contain no executable application behavior.
-omit = ["*/core/market_data.py", "*/core/persistence.py", "*/core/similarity.py"]
+omit = ["*/core/market_data.py", "*/core/persistence.py"]
 
 [tool.ruff]
 line-length = 100
