@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,6 +18,7 @@ class Settings(BaseSettings):
     twelve_data_api_key: SecretStr | None = None
     twelve_data_base_url: str = "https://api.twelvedata.com"
     market_data_timeout_seconds: float = 10.0
+    database_path: Path = Path("data/shapefinder.sqlite3")
 
 
 @lru_cache

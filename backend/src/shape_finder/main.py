@@ -8,18 +8,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from shape_finder import __version__
 from shape_finder.api.error_handlers import register_error_handlers
 from shape_finder.api.router import api_router
+from shape_finder.application.market_data_service import MarketDataService
 from shape_finder.config import get_settings
 from shape_finder.core.market_data import MarketDataProvider
+from shape_finder.core.persistence import MarketDataRepository
 from shape_finder.infrastructure.market_data.twelve_data import TwelveDataProvider
+from shape_finder.infrastructure.persistence.sqlite_market_data import SQLiteMarketDataRepository
 
 
-def create_app(provider: MarketDataProvider | None = None) -> FastAPI:
+def create_app(
+    provider: MarketDataProvider | None = None,
+    repository: MarketDataRepository | None = None,
+) -> FastAPI:
     settings = get_settings()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        active_repository = repository or SQLiteMarketDataRepository(settings.database_path)
+        await active_repository.initialize()
+
         if provider is not None:
-            application.state.market_data_provider = provider
+            application.state.market_data_service = MarketDataService(provider, active_repository)
             yield
             return
 
@@ -32,7 +41,10 @@ def create_app(provider: MarketDataProvider | None = None) -> FastAPI:
                 if settings.twelve_data_api_key
                 else None
             )
-            application.state.market_data_provider = TwelveDataProvider(client, key)
+            active_provider = TwelveDataProvider(client, key)
+            application.state.market_data_service = MarketDataService(
+                active_provider, active_repository
+            )
             yield
 
     application = FastAPI(

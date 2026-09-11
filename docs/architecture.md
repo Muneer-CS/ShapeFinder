@@ -7,13 +7,27 @@ Dependencies point inward: API and infrastructure depend on application/core con
 ## Backend packages
 
 - `core`: provider-neutral domain models and protocols for OHLCV market data, similarity analysis, and persistence.
-- `application`: use cases that coordinate core contracts. Phase 1 intentionally contains no search workflow.
-- `infrastructure`: concrete external adapters. `TwelveDataProvider` owns HTTP query construction, provider errors, response validation, and conversion into core models.
+- `application`: `MarketDataService` computes missing coverage, refreshes the recent edge, chunks requests, and coordinates atomic persistence.
+- `infrastructure`: `TwelveDataProvider` owns provider HTTP behavior; `SQLiteMarketDataRepository` owns relational storage and migrations.
 - `api`: transport concerns such as FastAPI routes and response schemas.
 
 ## Intended extension points
 
-`MarketDataProvider.get_historical_bars` retrieves a normalized `TimeSeries` for a symbol, interval, and exact time range. `MarketDataService` enforces provider-independent date and symbol rules. `SimilarityEngine` and `SimilarityResultRepository` continue to isolate future numerical analysis and storage.
+`MarketDataProvider.get_historical_bars` retrieves normalized external data. `MarketDataRepository` stores and queries normalized bars plus synchronization coverage. `MarketDataService` depends only on these protocols. `SimilarityEngine` and `SimilarityResultRepository` continue to isolate future numerical analysis and result storage.
+
+## SQLite schema and migrations
+
+`market_bars` uses `(symbol, interval, timestamp_utc)` as its `WITHOUT ROWID` primary key. It stores OHLCV decimals as exact text, plus timezone, source, and fetch time. This primary key is also the required range-query index; an additional index would be redundant.
+
+`market_data_coverage` records successfully synchronized inclusive ranges even when weekends or other non-trading periods contain no bars. `schema_migrations` records each applied migration. Migrations are append-only, ordered, and run transactionally during application startup.
+
+Repository methods open bounded SQLite connections and run blocking database work off the async event loop. Upserts and coverage writes share a transaction. All provider chunks are fetched before that transaction begins, so a failed provider request cannot partially overwrite the cache.
+
+## Cache policy
+
+Coverage intervals determine missing ranges. Completed historical ranges are immutable cache hits. A request whose end falls within three interval durations of the current time refreshes that trailing three-period edge, allowing active and recently corrected candles to be updated. No scheduler or exchange calendar is assumed.
+
+Provider requests are divided into at most 4,500 theoretical interval points. Adjacent chunks are inclusive and the next chunk begins one exact interval after the previous end, preventing both gaps and duplicate boundaries.
 
 ## Timestamp policy
 
@@ -27,4 +41,4 @@ Twelve Data-specific error bodies are translated to stable internal exceptions. 
 
 ## Phase boundary
 
-Phase 2 provides on-demand market-data retrieval only. Persistence, similarity metrics, historical scanning, charting, prediction, and authentication remain out of scope.
+Phase 3 provides on-demand cached market-data retrieval only. Similarity metrics, historical scanning, charting, prediction, background jobs, and authentication remain out of scope.

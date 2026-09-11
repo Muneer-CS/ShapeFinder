@@ -1,6 +1,36 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
+
+from shape_finder.core.market_data import BarInterval, TimeSeries
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageRange:
+    start: datetime
+    end: datetime
+    synced_at: datetime
+
+
+class MarketDataRepository(Protocol):
+    async def initialize(self) -> None: ...
+
+    async def get_time_series(
+        self, symbol: str, interval: BarInterval, start: datetime, end: datetime
+    ) -> TimeSeries: ...
+
+    async def get_coverage(
+        self, symbol: str, interval: BarInterval, start: datetime, end: datetime
+    ) -> Sequence[CoverageRange]: ...
+
+    async def upsert_time_series(
+        self,
+        series: Sequence[TimeSeries],
+        coverage: Sequence[CoverageRange],
+        *,
+        source: str,
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)

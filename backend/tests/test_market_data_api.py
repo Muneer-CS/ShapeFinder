@@ -1,10 +1,12 @@
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from shape_finder.core.errors import MissingApiKeyError, RateLimitError
 from shape_finder.core.market_data import BarInterval, PriceBar, TimeSeries
+from shape_finder.infrastructure.persistence.sqlite_market_data import SQLiteMarketDataRepository
 from shape_finder.main import create_app
 
 
@@ -38,8 +40,9 @@ class StubProvider:
         )
 
 
-def test_market_data_api_returns_normalized_response() -> None:
-    with TestClient(create_app(StubProvider())) as client:
+def test_market_data_api_returns_normalized_response(tmp_path: Path) -> None:
+    repository = SQLiteMarketDataRepository(tmp_path / "api.sqlite3")
+    with TestClient(create_app(StubProvider(), repository)) as client:
         response = client.get(
             "/api/v1/market-data/aapl",
             params={
@@ -67,8 +70,9 @@ def test_market_data_api_returns_normalized_response() -> None:
     }
 
 
-def test_market_data_api_rejects_invalid_range() -> None:
-    with TestClient(create_app(StubProvider())) as client:
+def test_market_data_api_rejects_invalid_range(tmp_path: Path) -> None:
+    repository = SQLiteMarketDataRepository(tmp_path / "api.sqlite3")
+    with TestClient(create_app(StubProvider(), repository)) as client:
         response = client.get(
             "/api/v1/market-data/AAPL",
             params={
@@ -81,8 +85,9 @@ def test_market_data_api_rejects_invalid_range() -> None:
     assert response.json()["error"]["code"] == "INVALID_DATE_RANGE"
 
 
-def test_market_data_api_validates_interval_and_timezone() -> None:
-    with TestClient(create_app(StubProvider())) as client:
+def test_market_data_api_validates_interval_and_timezone(tmp_path: Path) -> None:
+    repository = SQLiteMarketDataRepository(tmp_path / "api.sqlite3")
+    with TestClient(create_app(StubProvider(), repository)) as client:
         response = client.get(
             "/api/v1/market-data/AAPL",
             params={
@@ -94,7 +99,7 @@ def test_market_data_api_validates_interval_and_timezone() -> None:
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
-    with TestClient(create_app(StubProvider())) as client:
+    with TestClient(create_app(StubProvider(), repository)) as client:
         response = client.get(
             "/api/v1/market-data/AAPL",
             params={
@@ -107,13 +112,14 @@ def test_market_data_api_validates_interval_and_timezone() -> None:
     assert response.json()["error"]["code"] == "INVALID_DATE_RANGE"
 
 
-def test_market_data_api_maps_provider_errors() -> None:
+def test_market_data_api_maps_provider_errors(tmp_path: Path) -> None:
     cases = [
         (MissingApiKeyError(), 503, "PROVIDER_NOT_CONFIGURED"),
         (RateLimitError(), 429, "PROVIDER_RATE_LIMITED"),
     ]
-    for error, expected_status, expected_code in cases:
-        with TestClient(create_app(StubProvider(error))) as client:
+    for index, (error, expected_status, expected_code) in enumerate(cases):
+        repository = SQLiteMarketDataRepository(tmp_path / f"api-{index}.sqlite3")
+        with TestClient(create_app(StubProvider(error), repository)) as client:
             response = client.get(
                 "/api/v1/market-data/AAPL",
                 params={

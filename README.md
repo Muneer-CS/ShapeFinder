@@ -2,9 +2,9 @@
 
 ShapeFinder is the foundation for a stock-chart similarity application. The future product will compare normalized chart behaviour across securities and historical periods; it is not a forecasting or trading-recommendation tool.
 
-## Current scope: Phase 2
+## Current scope: Phase 3
 
-The foundation now includes a production-oriented Twelve Data adapter behind the provider-neutral market-data contract. The API can retrieve normalized OHLCV data on demand when configured. It does **not** scan history, calculate similarity, show match scores, cache market data, predict prices, or make recommendations.
+ShapeFinder now maintains a local normalized market database and synchronizes missing or recent data through the provider abstraction. This prevents later similarity work from repeatedly downloading the same bars. It does **not** scan history, calculate similarity, show match scores, predict prices, or make recommendations.
 
 ## Architecture
 
@@ -14,12 +14,13 @@ frontend (React UI)
 backend API routes
         │
 application services
-        ├── market-data provider protocol
+        ├── market-data repository protocol → SQLite
+        ├── market-data provider protocol → Twelve Data
         ├── similarity engine protocol
         └── repository protocol
 ```
 
-The core layer contains provider-neutral domain types. The Twelve Data implementation is injected behind `MarketDataProvider`, so provider response formats do not leak into services, API responses, or the UI. Database-specific code will remain behind repository interfaces, allowing a later move from SQLite to PostgreSQL.
+The core layer contains provider-neutral domain types. `MarketDataService` coordinates `MarketDataRepository` and `MarketDataProvider`; it does not import SQLite or Twelve Data. This keeps both the data vendor and database replaceable, including a later migration to PostgreSQL.
 
 ## Project layout
 
@@ -51,6 +52,24 @@ The API is available at `http://localhost:8000`.
 
 The market-data endpoint requires timezone-aware ISO 8601 `start` and `end` values. Supported intervals are `1min`, `5min`, `15min`, `30min`, `1h`, and `1day`.
 
+## Local market database
+
+SQLite is the initial persistence adapter. By default, the backend creates `data/shapefinder.sqlite3`; override this with `DATABASE_PATH`. Database, WAL, and shared-memory files are ignored by Git.
+
+Schema changes use small, ordered application migrations recorded in `schema_migrations`, so upgrades do not require deleting the database. OHLCV values are stored as decimal strings to preserve exact provider precision. The composite primary key `(symbol, interval, timestamp_utc)` both prevents duplicates and supports chronological range queries. Successful synchronization ranges are recorded separately, including source and synchronization time.
+
+Writes use one transaction and batch upserts. A repeated or revised provider bar updates the existing row, allowing current data and corrections to replace stale values without duplicates.
+
+### Synchronization and freshness
+
+- Complete historical coverage is returned entirely from SQLite without calling the provider.
+- Missing regions are requested independently, then committed together only after all provider calls succeed.
+- Recent requests refresh only the last three interval periods. This conservatively revisits an active daily candle or latest intraday bars without re-fetching older history.
+- If the cache is complete but Twelve Data is unconfigured, cached data is still returned—even for a recent range. Missing data still returns `PROVIDER_NOT_CONFIGURED`.
+- Requests are deterministically split into chunks capped at 4,500 theoretical interval points, safely below Twelve Data's 5,000-point limit. Chunk boundaries advance by exactly one interval to avoid gaps or duplicate boundary bars.
+
+This is intentionally not a full exchange-calendar model. Non-trading gaps are represented by synchronization coverage rather than fabricated bars, and recent-edge refreshes allow incomplete candles to be corrected later.
+
 ## Twelve Data configuration
 
 Copy `.env.example` to an untracked `.env` and set `TWELVE_DATA_API_KEY` for live market data. The key is read only by FastAPI and must never use a `VITE_` prefix. With no key, the application and health route still start normally; market-data requests return `503 PROVIDER_NOT_CONFIGURED`.
@@ -64,7 +83,7 @@ The provider adapter:
 - retries transient network and server failures once, but never retries invalid requests, authentication failures, or rate limits;
 - returns at most the data supplied by one Twelve Data response.
 
-Twelve Data documents a maximum of 5,000 points per time-series request. Data availability, freshness, exchanges, and request quotas depend on the configured account tier. Streaming is not used in this phase.
+Twelve Data documents a maximum of 5,000 points per time-series request. Data availability, freshness, exchanges, and request quotas depend on the configured account tier. Streaming and background synchronization are not used in this phase.
 
 ### Frontend
 
