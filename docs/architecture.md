@@ -4,6 +4,20 @@
 
 Dependencies point inward: API and infrastructure depend on application/core contracts, never the reverse. The frontend knows only the public HTTP contract.
 
+## Frontend flow
+
+The React form holds two distinct ranges. The reference range is converted to timezone-aware API boundaries and sent through the typed `marketData` client. The search range is validated and captured with the successful reference result, but remains local session state for future similarity work.
+
+```text
+reference form → typed HTTP client → FastAPI route → MarketDataService
+                                                      ├── SQLite cache
+                                                      └── Twelve Data (when needed)
+API bars → exact close values → responsive Recharts line chart
+search range ─────────────────→ local future-search context only
+```
+
+Daily inputs use calendar-day boundaries; intraday inputs use the browser's local date-time control and are serialized as UTC ISO 8601 values. Public API error codes are mapped to safe, actionable UI messages without exposing provider payloads or credentials.
+
 ## Backend packages
 
 - `core`: provider-neutral domain models and protocols for OHLCV market data, similarity analysis, and persistence.
@@ -41,4 +55,4 @@ Twelve Data-specific error bodies are translated to stable internal exceptions. 
 
 ## Phase boundary
 
-Phase 3 provides on-demand cached market-data retrieval only. Similarity metrics, historical scanning, charting, prediction, background jobs, and authentication remain out of scope.
+Phase 4 adds interactive reference selection and charting to the on-demand cached market-data retrieval foundation. Search dates are captured only as future intent. Similarity metrics, historical scanning, match ranking, prediction, background jobs, and authentication remain out of scope.

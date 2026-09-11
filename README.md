@@ -2,14 +2,14 @@
 
 ShapeFinder is the foundation for a stock-chart similarity application. The future product will compare normalized chart behaviour across securities and historical periods; it is not a forecasting or trading-recommendation tool.
 
-## Current scope: Phase 3
+## Current scope: Phase 4
 
-ShapeFinder now maintains a local normalized market database and synchronizes missing or recent data through the provider abstraction. This prevents later similarity work from repeatedly downloading the same bars. It does **not** scan history, calculate similarity, show match scores, predict prices, or make recommendations.
+ShapeFinder now provides a polished reference-chart workflow on top of the local normalized market database and provider abstraction. A user can choose a ticker, reference period, future search boundary, and interval, then load an exact closing-price chart from the existing API. Reference dates define the chart being studied; search dates are retained separately for the later matching phase and are not sent to the market-data endpoint. ShapeFinder still does **not** scan history, calculate similarity, show match scores, predict prices, or make recommendations.
 
 ## Architecture
 
 ```text
-frontend (React UI)
+frontend (React UI + typed API client + Recharts)
         │ HTTP
 backend API routes
         │
@@ -24,7 +24,7 @@ The core layer contains provider-neutral domain types. `MarketDataService` coord
 
 ## Project layout
 
-- `frontend/` — React, TypeScript, Vite, Vitest, ESLint, and Prettier
+- `frontend/` — React, TypeScript, Vite, Recharts, Vitest, ESLint, and Prettier
 - `backend/src/shape_finder/` — FastAPI entrypoint and separated core, application, API, and infrastructure packages
 - `backend/tests/` — backend API tests
 - `docs/architecture.md` — boundaries and future extension points
@@ -96,6 +96,10 @@ npm run dev
 ```
 
 Open `http://localhost:5173`. Set `VITE_API_BASE_URL` in an untracked `.env` if the API uses a different origin.
+
+The workflow supports daily date inputs and timezone-aware intraday date-time inputs for `1min`, `5min`, `15min`, `30min`, `1h`, and `1day`. It validates the ticker and both ranges before requesting data, shows loading and safe failure states, and replaces the previous reference chart after a successful request. The chart uses the API's exact closing values without normalization or similarity processing.
+
+The search period is deliberately session-only UI state in Phase 4. It appears beside the loaded reference so the distinction is visible, but it is not persisted and does not initiate a search.
 
 ## Quality checks
 
