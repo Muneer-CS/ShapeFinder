@@ -1,0 +1,251 @@
+:root {
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  color: #edf7f3;
+  background: #07110f;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 80% 20%, #123329 0, transparent 31rem), #07110f;
+}
+button,
+input {
+  font: inherit;
+}
+main {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0 5vw;
+}
+.topbar {
+  height: 5.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #244139;
+}
+.brand {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+  color: #edf7f3;
+  text-decoration: none;
+  font-weight: 760;
+  letter-spacing: -0.02em;
+}
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.55rem;
+  color: #07110f;
+  background: #6ee7b7;
+  font-size: 1.4rem;
+}
+.status {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid #2b4b42;
+  border-radius: 999px;
+  color: #a9bbb5;
+  font-size: 0.875rem;
+}
+.status-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: #8c9b96;
+}
+.status-connected .status-dot {
+  background: #6ee7b7;
+  box-shadow: 0 0 0 4px #6ee7b71d;
+}
+.status-offline .status-dot {
+  background: #f99b8d;
+}
+.workspace {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(17rem, 0.72fr) minmax(30rem, 1.28fr);
+  gap: clamp(2rem, 6vw, 7rem);
+  align-items: center;
+  padding: 5rem 0;
+}
+.eyebrow {
+  color: #6ee7b7;
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+h1 {
+  margin: 1rem 0 1.35rem;
+  max-width: 9ch;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(3.3rem, 6vw, 6.5rem);
+  font-weight: 500;
+  line-height: 0.94;
+  letter-spacing: -0.055em;
+}
+.lede {
+  max-width: 31rem;
+  color: #a9bbb5;
+  font-size: 1.1rem;
+  line-height: 1.65;
+}
+.chart-card {
+  overflow: hidden;
+  border: 1px solid #29483f;
+  border-radius: 1rem;
+  background: linear-gradient(145deg, #10211d, #0a1714);
+  box-shadow: 0 2rem 6rem #0006;
+}
+.chart-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.4rem 1.5rem;
+  border-bottom: 1px solid #233b34;
+}
+.chart-toolbar div {
+  display: grid;
+  gap: 0.35rem;
+}
+.label {
+  color: #738980;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.phase-badge {
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.4rem;
+  color: #9fefcf;
+  background: #183c32;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.chart-area {
+  position: relative;
+  height: 19rem;
+  padding: 2rem 1.5rem 1.8rem;
+}
+.chart-area svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.gridline {
+  fill: none;
+  stroke: #20372f;
+  stroke-width: 1;
+}
+.area {
+  fill: url(#area);
+}
+.line {
+  fill: none;
+  stroke: #6ee7b7;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+.axis-label {
+  position: absolute;
+  bottom: 0.8rem;
+  color: #60766d;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+}
+.axis-start {
+  left: 1.5rem;
+}
+.axis-end {
+  right: 1.5rem;
+}
+.future-controls {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  padding: 1.2rem 1.5rem;
+  border-top: 1px solid #233b34;
+  background: #0b1916;
+}
+.future-controls button {
+  border: 1px solid #3d5c52;
+  border-radius: 0.55rem;
+  padding: 0.65rem 1rem;
+  color: #6f847d;
+  background: #14231f;
+  cursor: not-allowed;
+}
+.future-controls p {
+  margin: 0;
+  color: #748981;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+footer {
+  min-height: 4.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid #244139;
+  color: #71847e;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+@media (max-width: 850px) {
+  .workspace {
+    grid-template-columns: 1fr;
+    padding: 3.5rem 0;
+  }
+  h1 {
+    max-width: none;
+  }
+  .chart-area {
+    height: 15rem;
+  }
+}
+@media (max-width: 520px) {
+  main {
+    padding: 0 1.1rem;
+  }
+  .status {
+    padding: 0.45rem;
+  }
+  .status {
+    font-size: 0;
+  }
+  .future-controls {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  footer {
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.4rem;
+  }
+}
