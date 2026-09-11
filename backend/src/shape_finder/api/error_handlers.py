@@ -16,6 +16,7 @@ from shape_finder.core.errors import (
     RateLimitError,
     UnsupportedIntervalError,
 )
+from shape_finder.core.similarity_search import InvalidSimilaritySearchError
 
 ERRORS: Final[dict[type[MarketDataError], tuple[int, str, str]]] = {
     MissingApiKeyError: (503, "PROVIDER_NOT_CONFIGURED", "Market data is not configured."),
@@ -39,6 +40,20 @@ ERRORS: Final[dict[type[MarketDataError], tuple[int, str, str]]] = {
 
 
 def register_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(InvalidSimilaritySearchError)
+    async def similarity_search_error(
+        _: Request, error: InvalidSimilaritySearchError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "INVALID_SIMILARITY_SEARCH",
+                    "message": str(error),
+                }
+            },
+        )
+
     @app.exception_handler(MarketDataError)
     async def market_data_error(_: Request, error: MarketDataError) -> JSONResponse:
         status, code, message = ERRORS[type(error)]

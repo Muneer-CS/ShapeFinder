@@ -181,3 +181,10 @@ def test_output_is_deterministic_and_bounded_across_varied_candidates() -> None:
                 result.amplitude_score,
             )
         )
+
+
+def test_prepared_reference_produces_identical_score() -> None:
+    candidate = [100, 108, 115, 106, 100, 111, 120, 118, 128]
+    prepared = ENGINE.prepare(REFERENCE)
+
+    assert ENGINE.compare_prepared(prepared, candidate) == ENGINE.compare(REFERENCE, candidate)

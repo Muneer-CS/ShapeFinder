@@ -2,9 +2,9 @@
 
 ShapeFinder is the foundation for a stock-chart similarity application. The future product will compare normalized chart behaviour across securities and historical periods; it is not a forecasting or trading-recommendation tool.
 
-## Current scope: Phase 5
+## Current scope: Phase 6
 
-ShapeFinder now includes Similarity Engine V1, a pure analysis component that compares two explicitly supplied close-price series and returns an interpretable 0–100 score. The Phase 4 reference-chart workflow remains unchanged. ShapeFinder still does **not** scan the market, rank real historical matches, display similarity results, predict prices, or make recommendations.
+ShapeFinder now includes its first historical similarity scanner. The backend loads a reference series and up to 10 caller-supplied candidate symbols through the existing cache-aware market-data service, evaluates every comparable sliding window, suppresses overlapping duplicates, and returns globally ranked matches. The Phase 4 reference-chart workflow remains unchanged. ShapeFinder still does **not** discover or scan the full market, display similarity results in the UI, predict prices, or make recommendations.
 
 ## Architecture
 
@@ -17,6 +17,7 @@ application services
         ├── market-data repository protocol → SQLite
         ├── market-data provider protocol → Twelve Data
         ├── chart similarity engine → deterministic close-price analysis
+        ├── historical scanner → windowing, ranking, overlap suppression
         └── repository protocol
 ```
 
@@ -51,8 +52,11 @@ The API is available at `http://localhost:8000`.
 
 - `GET /api/v1/health` — configuration-independent service health
 - `GET /api/v1/market-data/{symbol}?start=...&end=...&interval=...` — normalized OHLCV history
+- `POST /api/v1/similarity/search` — ranked historical matches for up to 10 explicit candidate symbols
 
 The market-data endpoint requires timezone-aware ISO 8601 `start` and `end` values. Supported intervals are `1min`, `5min`, `15min`, `30min`, `1h`, and `1day`.
+
+The similarity endpoint accepts a `reference` object (`symbol`, `start`, `end`, `interval`), a `search` object (`start`, `end`, `symbols`), `top_n` from 1–100, and an optional `minimum_similarity` from 0–100. It returns the loaded reference summary, enforced search range, ranked matches with score components, and scan statistics. All timestamps must include a timezone.
 
 ## Local market database
 

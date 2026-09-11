@@ -9,6 +9,11 @@ from shape_finder import __version__
 from shape_finder.api.error_handlers import register_error_handlers
 from shape_finder.api.router import api_router
 from shape_finder.application.market_data_service import MarketDataService
+from shape_finder.application.similarity_engine import ChartSimilarityEngine
+from shape_finder.application.similarity_search import (
+    HistoricalSimilarityScanner,
+    SimilaritySearchService,
+)
 from shape_finder.config import get_settings
 from shape_finder.core.market_data import MarketDataProvider
 from shape_finder.core.persistence import MarketDataRepository
@@ -27,8 +32,16 @@ def create_app(
         active_repository = repository or SQLiteMarketDataRepository(settings.database_path)
         await active_repository.initialize()
 
+        def configure_services(active_provider: MarketDataProvider) -> None:
+            market_data = MarketDataService(active_provider, active_repository)
+            application.state.market_data_service = market_data
+            application.state.similarity_search_service = SimilaritySearchService(
+                market_data,
+                HistoricalSimilarityScanner(ChartSimilarityEngine()),
+            )
+
         if provider is not None:
-            application.state.market_data_service = MarketDataService(provider, active_repository)
+            configure_services(provider)
             yield
             return
 
@@ -42,9 +55,7 @@ def create_app(
                 else None
             )
             active_provider = TwelveDataProvider(client, key)
-            application.state.market_data_service = MarketDataService(
-                active_provider, active_repository
-            )
+            configure_services(active_provider)
             yield
 
     application = FastAPI(
@@ -57,7 +68,7 @@ def create_app(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=False,
-        allow_methods=["GET"],
+        allow_methods=["GET", "POST"],
         allow_headers=["Accept", "Content-Type"],
     )
     application.include_router(api_router, prefix="/api/v1")

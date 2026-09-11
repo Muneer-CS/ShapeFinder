@@ -2,7 +2,11 @@ import math
 from collections.abc import Sequence
 from decimal import Decimal, InvalidOperation, localcontext
 
-from shape_finder.core.similarity import PriceValue, SimilarityScore
+from shape_finder.core.similarity import (
+    PreparedSimilaritySeries,
+    PriceValue,
+    SimilarityScore,
+)
 
 _POINTS = 64
 _FLAT_TOLERANCE = 1e-8
@@ -24,43 +28,51 @@ class ChartSimilarityEngine:
     def compare(
         self, reference: Sequence[PriceValue], candidate: Sequence[PriceValue]
     ) -> SimilarityScore:
-        reference_path = _log_relative_path(reference)
-        candidate_path = _log_relative_path(candidate)
-        reference_aligned = _resample(reference_path, _POINTS)
-        candidate_aligned = _resample(candidate_path, _POINTS)
+        return self.compare_prepared(self.prepare(reference), candidate)
 
-        reference_amplitude = _rms(_center(reference_aligned))
-        candidate_amplitude = _rms(_center(candidate_aligned))
-        reference_flat = reference_amplitude <= _FLAT_TOLERANCE
-        candidate_flat = candidate_amplitude <= _FLAT_TOLERANCE
+    def prepare(self, values: Sequence[PriceValue]) -> PreparedSimilaritySeries:
+        aligned = _resample(_log_relative_path(values), _POINTS)
+        centered = _center(aligned)
+        amplitude = _rms(centered)
+        flat = amplitude <= _FLAT_TOLERANCE
+        shape = [] if flat else _unit_rms(centered)
+        return PreparedSimilaritySeries(
+            aligned=tuple(aligned),
+            amplitude=amplitude,
+            flat=flat,
+            shape=tuple(shape),
+            slopes=tuple(_differences(shape)),
+        )
 
-        if reference_flat and candidate_flat:
+    def compare_prepared(
+        self,
+        reference: PreparedSimilaritySeries,
+        candidate: Sequence[PriceValue],
+    ) -> SimilarityScore:
+        prepared_candidate = self.prepare(candidate)
+        if reference.flat and prepared_candidate.flat:
             return SimilarityScore(100.0, 100.0, 100.0, 100.0, 100.0)
-        if reference_flat or candidate_flat:
+        if reference.flat or prepared_candidate.flat:
             return SimilarityScore(0.0, 0.0, 0.0, 0.0, 0.0)
 
-        reference_shape = _unit_rms(_center(reference_aligned))
-        candidate_shape = _unit_rms(_center(candidate_aligned))
-        shape_score = _correlation_score(_cosine(reference_shape, candidate_shape))
-
-        reference_slopes = _differences(reference_shape)
-        candidate_slopes = _differences(candidate_shape)
-        direction_score = _correlation_score(_cosine(reference_slopes, candidate_slopes))
+        shape_score = _correlation_score(_cosine(reference.shape, prepared_candidate.shape))
+        direction_score = _correlation_score(_cosine(reference.slopes, prepared_candidate.slopes))
 
         fitted_scale = max(
             0.0,
-            _dot(reference_shape, candidate_shape) / _dot(candidate_shape, candidate_shape),
+            _dot(reference.shape, prepared_candidate.shape)
+            / _dot(prepared_candidate.shape, prepared_candidate.shape),
         )
         fitted_error = _rms(
             [
                 left - fitted_scale * right
-                for left, right in zip(reference_shape, candidate_shape, strict=True)
+                for left, right in zip(reference.shape, prepared_candidate.shape, strict=True)
             ]
         )
         error_score = 100.0 * math.exp(-2.0 * fitted_error)
 
-        amplitude_ratio = min(reference_amplitude, candidate_amplitude) / max(
-            reference_amplitude, candidate_amplitude
+        amplitude_ratio = min(reference.amplitude, prepared_candidate.amplitude) / max(
+            reference.amplitude, prepared_candidate.amplitude
         )
         amplitude_score = 100.0 * amplitude_ratio
 

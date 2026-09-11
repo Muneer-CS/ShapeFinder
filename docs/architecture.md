@@ -61,7 +61,32 @@ Ordinary values use fast double-precision logarithms. Values outside the finite 
 
 For input lengths `n` and `m`, time complexity is `O(n + m + 64)` and working memory is `O(n + m + 64)`. A local timing sanity check averaged about 1.6 ms per comparison for two 500-point series on the development machine; this is indicative, not a performance guarantee.
 
-V1 assumes observations are ordered and reasonably cover comparable start-to-end periods. Because its input contains closes rather than timestamps, interpolation treats observations as evenly spaced along each period. It uses no volume, candlestick features, indicators, fundamentals, sectors, news, or machine learning. It does not scan or rank the market and makes no predictions. The engineered weights and practical score thresholds are deterministic but not statistically validated; later real-market evaluation may refine them.
+V1 assumes observations are ordered and reasonably cover comparable start-to-end periods. Because its input contains closes rather than timestamps, interpolation treats observations as evenly spaced along each period. It uses no volume, candlestick features, indicators, fundamentals, sectors, news, or machine learning. The engine itself performs no retrieval, scanning, or prediction. The engineered weights and practical score thresholds are deterministic but not statistically validated; later real-market evaluation may refine them.
+
+## Historical similarity scanner
+
+`SimilaritySearchService` is the Phase 6 orchestration boundary. It normalizes and de-duplicates symbols, retrieves the reference once, then retrieves each candidate range once and sequentially through `MarketDataService`. This preserves SQLite caching and conservative provider usage. Any reference or candidate retrieval failure fails the whole request; Phase 6 does not return silent partial results.
+
+`HistoricalSimilarityScanner` performs no I/O. It prepares the reference's fixed engine representation once and reuses it for every window; `compare_prepared` is tested to produce exactly the same result as the ordinary Phase 5 comparison path. Its candidate window length equals the number of valid reference bars, not the reference's calendar duration. It keeps chronological, timezone-aware bars whose close is finite and positive and whose timestamp falls inside the inclusive search range. Missing or invalid observations are not fabricated; therefore equal-bar windows can span different calendar durations.
+
+### Windowing and selection
+
+- The default stride is one valid bar. For `L` reference bars and `N` candidate bars, offsets `0` through `N − L` are evaluated, including the final possible window.
+- Reference and candidate intervals must match exactly.
+- Ranking is deterministic: overall score descending, candidate start ascending, symbol ascending, then candidate end ascending.
+- `minimum_similarity`, when present, removes scores below its inclusive 0–100 threshold before selection. `top_n` returns at most 1–100 matches.
+- After ranking, a lower-ranked window is suppressed when it shares **more than 50%** of its bar timestamps with an already selected window for the same symbol. Equal-score duplicates therefore collapse to one representative event; separate events and matches from different symbols remain eligible.
+- For the reference symbol itself, a candidate is excluded before scoring when it shares more than 50% of its timestamps with the loaded reference. This removes the exact reference and nearby trivial shifts while preserving distinct history elsewhere in the same stock.
+
+The overlap and self-overlap thresholds, plus stride, are constructor settings for controlled future tuning. Defaults are fixed for the public Phase 6 service.
+
+### API contract and limits
+
+`POST /api/v1/similarity/search` accepts structured `reference` and `search` objects. The backend—not the browser—loads reference closes. The request permits at most 10 supplied candidate symbols, normalizes whitespace/case, de-duplicates repeated symbols, and validates timestamp order/timezones, interval, `top_n`, and score threshold. The response contains a reference summary, the enforced search range, provider-neutral match periods and score components, plus counts for requested/scanned symbols, evaluated/passing windows, and returned matches.
+
+For `S` symbols with `Nₛ` candidate bars and reference length `L`, scanning performs `Σ max(0, Nₛ − L + 1)` engine comparisons at stride one. Data retrieval is once per series; no database query occurs per window. Phase 6 intentionally sorts the in-memory scored windows to keep selection simple and correct. A development-machine sanity run with five 1,000-bar candidates and a 30-bar reference evaluated 4,855 windows in 0.936 seconds, about 5,189 comparisons/second. This is indicative rather than a performance guarantee and is suitable for a small explicit list, not full-market scale.
+
+Phase 6 does not discover a stock universe, scan thousands of symbols, schedule jobs, distribute work, persist scan results, or render results in the frontend. It uses Similarity Engine V1 unchanged, and its score remains an engineered—not statistically validated—measure.
 
 ## SQLite schema and migrations
 
@@ -89,4 +114,4 @@ Twelve Data-specific error bodies are translated to stable internal exceptions. 
 
 ## Phase boundary
 
-Phase 5 adds deterministic comparison of two supplied close-price sequences. Historical scanning, real-market match ranking, similarity-result APIs and UI, prediction, background jobs, and authentication remain out of scope.
+Phase 6 adds on-demand historical scanning and global ranking for up to 10 caller-supplied symbols. Full-market discovery/scanning, similarity-result UI, prediction, background jobs, and authentication remain out of scope.

@@ -17,9 +17,28 @@ class SimilarityScore:
     amplitude_score: float
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedSimilaritySeries:
+    """Reusable engine-owned representation for repeated comparisons."""
+
+    aligned: tuple[float, ...]
+    amplitude: float
+    flat: bool
+    shape: tuple[float, ...]
+    slopes: tuple[float, ...]
+
+
 class SimilarityEngine(Protocol):
     """Provider- and transport-independent close-price comparison boundary."""
 
     def compare(
         self, reference: Sequence[PriceValue], candidate: Sequence[PriceValue]
+    ) -> SimilarityScore: ...
+
+    def prepare(self, values: Sequence[PriceValue]) -> PreparedSimilaritySeries: ...
+
+    def compare_prepared(
+        self,
+        reference: PreparedSimilaritySeries,
+        candidate: Sequence[PriceValue],
     ) -> SimilarityScore: ...
