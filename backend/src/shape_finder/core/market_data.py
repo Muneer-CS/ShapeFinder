@@ -1,4 +1,3 @@
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -9,6 +8,8 @@ from typing import Protocol
 class BarInterval(StrEnum):
     ONE_MINUTE = "1min"
     FIVE_MINUTES = "5min"
+    FIFTEEN_MINUTES = "15min"
+    THIRTY_MINUTES = "30min"
     ONE_HOUR = "1h"
     ONE_DAY = "1day"
     ONE_WEEK = "1week"
@@ -24,6 +25,14 @@ class PriceBar:
     volume: Decimal
 
 
+@dataclass(frozen=True, slots=True)
+class TimeSeries:
+    symbol: str
+    interval: BarInterval
+    timezone: str
+    bars: tuple[PriceBar, ...]
+
+
 class MarketDataProvider(Protocol):
     """Contract implemented by Twelve Data or any future market-data adapter."""
 
@@ -33,4 +42,4 @@ class MarketDataProvider(Protocol):
         start: datetime,
         end: datetime,
         interval: BarInterval,
-    ) -> Sequence[PriceBar]: ...
+    ) -> TimeSeries: ...

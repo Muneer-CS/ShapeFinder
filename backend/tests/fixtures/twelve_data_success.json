@@ -1,0 +1,29 @@
+{
+  "meta": {
+    "symbol": "AAPL",
+    "interval": "1day",
+    "currency": "USD",
+    "exchange_timezone": "America/New_York",
+    "exchange": "NASDAQ",
+    "type": "Common Stock"
+  },
+  "values": [
+    {
+      "datetime": "2025-01-03",
+      "open": "243.36",
+      "high": "244.18",
+      "low": "241.89",
+      "close": "243.36",
+      "volume": "40244114"
+    },
+    {
+      "datetime": "2025-01-02",
+      "open": "248.93",
+      "high": "249.10",
+      "low": "241.82",
+      "close": "243.85",
+      "volume": "55740731"
+    }
+  ],
+  "status": "ok"
+}
