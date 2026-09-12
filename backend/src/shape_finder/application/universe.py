@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
@@ -16,6 +18,7 @@ UNIVERSE_NAMES = {
     UniverseKind.NYSE: "NYSE",
 }
 _US_COUNTRIES = {"US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"}
+logger = logging.getLogger("shape_finder.universe")
 
 
 class UniverseService:
@@ -33,6 +36,7 @@ class UniverseService:
         self._repository = repository
         self._ttl = ttl
         self._clock = clock
+        self._refresh_lock = asyncio.Lock()
 
     async def list_universes(self) -> tuple[UniverseDescriptor, ...]:
         symbols, refreshed_at, stale = await self._catalog()
@@ -61,11 +65,18 @@ class UniverseService:
     async def _catalog(
         self,
     ) -> tuple[tuple[SymbolMetadata, ...], datetime | None, bool]:
+        async with self._refresh_lock:
+            return await self._catalog_locked()
+
+    async def _catalog_locked(
+        self,
+    ) -> tuple[tuple[SymbolMetadata, ...], datetime | None, bool]:
         cached = tuple(await self._repository.list_universe_symbols())
         refreshed_at = await self._repository.get_universe_refreshed_at()
         now = self._clock()
         fresh = refreshed_at is not None and now - refreshed_at <= self._ttl
         if cached and fresh:
+            logger.info("universe_cache_hit symbols=%s", len(cached))
             return cached, refreshed_at, False
 
         try:
@@ -73,9 +84,11 @@ class UniverseService:
             await self._repository.replace_universe(
                 normalized, refreshed_at=now, source="twelve_data"
             )
+            logger.info("universe_refresh_complete symbols=%s", len(normalized))
             return normalized, now, False
         except MarketDataError:
             if cached:
+                logger.warning("universe_refresh_failed using_stale_cache=true")
                 return cached, refreshed_at, True
             raise
 

@@ -8,7 +8,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from shape_finder.core.errors import MalformedProviderResponseError
-from shape_finder.core.market_data import BarInterval, PriceBar, TimeSeries
+from shape_finder.core.market_data import BarInterval, PriceBar, TimeSeries, validate_time_series
 from shape_finder.core.persistence import CoverageRange
 from shape_finder.core.universe import SymbolMetadata
 from shape_finder.infrastructure.persistence.migrations import MIGRATIONS
@@ -32,8 +32,10 @@ class SQLiteMarketDataRepository:
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._path, timeout=10)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 10000")
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = NORMAL")
         return connection
 
     def _initialize_sync(self) -> None:
@@ -51,6 +53,13 @@ class SQLiteMarketDataRepository:
                 int(row["version"])
                 for row in connection.execute("SELECT version FROM schema_migrations")
             }
+            expected_versions = tuple(range(1, len(MIGRATIONS) + 1))
+            migration_versions = tuple(migration.version for migration in MIGRATIONS)
+            if migration_versions != expected_versions:
+                raise RuntimeError("Application migrations are not a contiguous version sequence.")
+            unknown = applied - set(migration_versions)
+            if unknown:
+                raise RuntimeError("Database schema is newer than this application supports.")
             for migration in MIGRATIONS:
                 if migration.version in applied:
                     continue
@@ -62,6 +71,21 @@ class SQLiteMarketDataRepository:
                         (migration.version, _utc_text(datetime.now(UTC))),
                     )
             connection.execute("PRAGMA optimize")
+
+    async def check_readiness(self) -> None:
+        await asyncio.to_thread(self._check_readiness_sync)
+
+    def _check_readiness_sync(self) -> None:
+        with closing(self._connect()) as connection:
+            integrity = connection.execute("PRAGMA quick_check(1)").fetchone()
+            if integrity is None or str(integrity[0]).lower() != "ok":
+                raise RuntimeError("Database integrity check failed.")
+            applied = {
+                int(row[0]) for row in connection.execute("SELECT version FROM schema_migrations")
+            }
+            expected = {migration.version for migration in MIGRATIONS}
+            if applied != expected:
+                raise RuntimeError("Database migrations are not current.")
 
     async def get_time_series(
         self, symbol: str, interval: BarInterval, start: datetime, end: datetime
@@ -150,6 +174,8 @@ class SQLiteMarketDataRepository:
     ) -> None:
         if len(series) != len(coverage):
             raise ValueError("Each synchronized series requires one coverage range.")
+        for item in series:
+            validate_time_series(item)
         with closing(self._connect()) as connection, connection:
             for item, covered in zip(series, coverage, strict=True):
                 connection.executemany(

@@ -169,6 +169,70 @@ async def test_maps_provider_errors(payload: dict[str, Any], error_type: type[Ex
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("status", "payload", "error_type"),
+    [
+        (401, {"status": "error", "code": 401, "message": "Invalid API key"}, AuthenticationError),
+        (429, {"status": "error", "code": 429, "message": "Credits exhausted"}, RateLimitError),
+    ],
+)
+async def test_does_not_retry_authentication_or_rate_limit_failures(
+    status: int, payload: dict[str, Any], error_type: type[Exception]
+) -> None:
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(status, json=payload)
+
+    provider = provider_for(httpx.MockTransport(handler), attempts=3)
+    with pytest.raises(error_type):
+        await provider.get_historical_bars(
+            "AAPL",
+            datetime(2025, 1, 1, tzinfo=UTC),
+            datetime(2025, 1, 4, tzinfo=UTC),
+            BarInterval.ONE_DAY,
+        )
+    assert calls == 1
+
+
+@pytest.mark.anyio
+async def test_provider_5xx_retry_is_bounded() -> None:
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(503, json={"status": "error", "code": 503})
+
+    provider = provider_for(httpx.MockTransport(handler), attempts=2)
+    with pytest.raises(ProviderNetworkError):
+        await provider.get_historical_bars(
+            "AAPL",
+            datetime(2025, 1, 1, tzinfo=UTC),
+            datetime(2025, 1, 4, tzinfo=UTC),
+            BarInterval.ONE_DAY,
+        )
+    assert calls == 2
+
+
+@pytest.mark.anyio
+async def test_provider_5xx_with_non_json_body_is_still_unavailable() -> None:
+    provider = provider_for(
+        httpx.MockTransport(lambda _: httpx.Response(503, text="upstream maintenance")),
+        attempts=1,
+    )
+    with pytest.raises(ProviderNetworkError, match="failed"):
+        await provider.get_historical_bars(
+            "AAPL",
+            datetime(2025, 1, 1, tzinfo=UTC),
+            datetime(2025, 1, 4, tzinfo=UTC),
+            BarInterval.ONE_DAY,
+        )
+
+
+@pytest.mark.anyio
 async def test_retries_transient_network_failure_once() -> None:
     calls = 0
 
@@ -202,6 +266,27 @@ async def test_network_failure_after_retry_is_safe() -> None:
             datetime(2025, 1, 4, tzinfo=UTC),
             BarInterval.ONE_DAY,
         )
+
+
+@pytest.mark.anyio
+async def test_provider_timeout_is_bounded_and_safe() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise httpx.ReadTimeout("request URL contains apikey=secret", request=request)
+
+    provider = provider_for(httpx.MockTransport(handler), attempts=2)
+    with pytest.raises(ProviderNetworkError, match="unreachable") as captured:
+        await provider.get_historical_bars(
+            "AAPL",
+            datetime(2025, 1, 1, tzinfo=UTC),
+            datetime(2025, 1, 4, tzinfo=UTC),
+            BarInterval.ONE_DAY,
+        )
+    assert calls == 2
+    assert "secret" not in str(captured.value)
 
 
 @pytest.mark.anyio

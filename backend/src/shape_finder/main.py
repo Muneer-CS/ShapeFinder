@@ -10,6 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from shape_finder import __version__
 from shape_finder.api.error_handlers import register_error_handlers
 from shape_finder.api.router import api_router
+from shape_finder.api.safety import (
+    RequestSafetyMiddleware,
+    SearchAdmissionController,
+    configure_logging,
+)
 from shape_finder.application.market_data_service import MarketDataService
 from shape_finder.application.similarity_engine import ChartSimilarityEngine
 from shape_finder.application.similarity_search import (
@@ -17,7 +22,7 @@ from shape_finder.application.similarity_search import (
     SimilaritySearchService,
 )
 from shape_finder.application.universe import UniverseService
-from shape_finder.config import get_settings
+from shape_finder.config import Settings, get_settings
 from shape_finder.core.market_data import MarketDataProvider
 from shape_finder.core.persistence import MarketDataRepository
 from shape_finder.core.universe import UniverseProvider, UniverseRepository
@@ -28,20 +33,24 @@ from shape_finder.infrastructure.persistence.sqlite_market_data import SQLiteMar
 def create_app(
     provider: MarketDataProvider | None = None,
     repository: MarketDataRepository | None = None,
+    *,
+    settings: Settings | None = None,
 ) -> FastAPI:
-    settings = get_settings()
+    active_settings = settings or get_settings()
+    configure_logging(active_settings.log_level)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        active_repository = repository or SQLiteMarketDataRepository(settings.database_path)
+        active_repository = repository or SQLiteMarketDataRepository(active_settings.database_path)
         await active_repository.initialize()
+        application.state.repository = active_repository
 
         def configure_services(active_provider: MarketDataProvider) -> None:
             market_data = MarketDataService(active_provider, active_repository)
             universe_service = UniverseService(
                 cast(UniverseProvider, active_provider),
                 cast(UniverseRepository, active_repository),
-                ttl=timedelta(hours=settings.universe_ttl_hours),
+                ttl=timedelta(hours=active_settings.universe_ttl_hours),
             )
             application.state.market_data_service = market_data
             application.state.universe_service = universe_service
@@ -58,12 +67,12 @@ def create_app(
             return
 
         async with httpx.AsyncClient(
-            base_url=settings.twelve_data_base_url,
-            timeout=httpx.Timeout(settings.market_data_timeout_seconds),
+            base_url=active_settings.twelve_data_base_url,
+            timeout=httpx.Timeout(active_settings.market_data_timeout_seconds),
         ) as client:
             key = (
-                settings.twelve_data_api_key.get_secret_value()
-                if settings.twelve_data_api_key
+                active_settings.twelve_data_api_key.get_secret_value()
+                if active_settings.twelve_data_api_key
                 else None
             )
             active_provider = TwelveDataProvider(client, key)
@@ -76,9 +85,17 @@ def create_app(
         version=__version__,
         lifespan=lifespan,
     )
+    application.state.search_admission = SearchAdmissionController(
+        active_settings.max_concurrent_scans
+    )
+    application.state.scan_timeout_seconds = active_settings.scan_timeout_seconds
+    application.add_middleware(
+        RequestSafetyMiddleware,
+        max_body_bytes=active_settings.max_request_body_bytes,
+    )
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=active_settings.cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST"],
         allow_headers=["Accept", "Content-Type"],

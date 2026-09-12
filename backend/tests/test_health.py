@@ -21,3 +21,5 @@ def test_openapi_exposes_health_endpoint() -> None:
 
     assert response.status_code == 200
     assert "/api/v1/health" in response.json()["paths"]
+    assert "/api/v1/readiness" in response.json()["paths"]
+    assert response.json()["info"]["version"] == "0.1.0"

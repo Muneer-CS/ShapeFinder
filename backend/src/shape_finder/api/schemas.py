@@ -15,6 +15,13 @@ class HealthResponse(BaseModel):
     version: str
 
 
+class ReadinessResponse(BaseModel):
+    status: Literal["ready"]
+    service: str
+    version: str
+    database: Literal["ready"]
+
+
 class PriceBarResponse(BaseModel):
     timestamp: datetime
     open: Decimal
@@ -160,6 +167,7 @@ class UniverseListResponse(BaseModel):
 class ErrorDetail(BaseModel):
     code: str
     message: str
+    request_id: str
 
 
 class ErrorResponse(BaseModel):

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -17,7 +18,7 @@ from shape_finder.core.errors import (
     RateLimitError,
     UnsupportedIntervalError,
 )
-from shape_finder.core.market_data import BarInterval, PriceBar, TimeSeries
+from shape_finder.core.market_data import BarInterval, PriceBar, TimeSeries, validate_time_series
 from shape_finder.core.universe import SymbolMetadata
 
 INTERVAL_MAP: Mapping[BarInterval, str] = {
@@ -28,6 +29,7 @@ INTERVAL_MAP: Mapping[BarInterval, str] = {
     BarInterval.ONE_HOUR: "1h",
     BarInterval.ONE_DAY: "1day",
 }
+logger = logging.getLogger("shape_finder.provider")
 
 
 class TwelveDataProvider:
@@ -111,6 +113,12 @@ class TwelveDataProvider:
 
     async def _request_endpoint(self, endpoint: str, params: dict[str, str]) -> Any:
         for attempt in range(self._retry_attempts):
+            logger.info(
+                "provider_request endpoint=%s attempt=%s max_attempts=%s",
+                endpoint,
+                attempt + 1,
+                self._retry_attempts,
+            )
             try:
                 response = await self._client.get(endpoint, params=params)
             except httpx.RequestError as error:
@@ -119,9 +127,16 @@ class TwelveDataProvider:
                 await asyncio.sleep(self._retry_backoff_seconds * (attempt + 1))
                 continue
 
-            if response.status_code >= 500 and attempt + 1 < self._retry_attempts:
-                await asyncio.sleep(self._retry_backoff_seconds * (attempt + 1))
-                continue
+            if response.status_code >= 500:
+                if attempt + 1 < self._retry_attempts:
+                    logger.warning(
+                        "provider_retry endpoint=%s category=server_error status=%s",
+                        endpoint,
+                        response.status_code,
+                    )
+                    await asyncio.sleep(self._retry_backoff_seconds * (attempt + 1))
+                    continue
+                raise ProviderNetworkError("Market-data provider request failed.")
 
             try:
                 payload: Any = response.json()
@@ -252,9 +267,14 @@ class TwelveDataProvider:
                 "Provider returned malformed OHLCV data."
             ) from error
 
-        return TimeSeries(
+        series = TimeSeries(
             symbol=symbol.upper(),
             interval=interval,
             timezone=timezone_name,
             bars=tuple(sorted(bars, key=lambda bar: bar.timestamp)),
         )
+        try:
+            validate_time_series(series)
+        except ValueError as error:
+            raise MalformedProviderResponseError("Provider returned invalid OHLCV data.") from error
+        return series

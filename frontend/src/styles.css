@@ -227,6 +227,26 @@ button:disabled {
   opacity: 0.58;
   cursor: not-allowed;
 }
+.fatal-error {
+  display: grid;
+  place-content: center;
+  justify-items: start;
+  gap: 1rem;
+  max-width: 44rem;
+}
+.fatal-error h1,
+.fatal-error p {
+  margin: 0;
+}
+.fatal-error button {
+  min-height: 3rem;
+  border: 0;
+  border-radius: 0.6rem;
+  padding: 0.7rem 1rem;
+  color: #07110f;
+  background: #6ee7b7;
+  font-weight: 800;
+}
 .form-error {
   margin: 0;
   color: #ffb5a8;

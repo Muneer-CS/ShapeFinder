@@ -177,6 +177,18 @@ function removeDefaultCandidates() {
 afterEach(() => vi.restoreAllMocks())
 
 describe('reference workflow', () => {
+  it('shows a clear API-unavailable state when the backend cannot be reached', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('offline'))),
+    )
+    render(<App />)
+    expect(await screen.findByText('API unavailable')).toBeInTheDocument()
+    expect(
+      await screen.findByText(/Universe metadata is unavailable/),
+    ).toBeInTheDocument()
+  })
+
   it('keeps reference and search periods visibly separate', () => {
     mockApi()
     render(<App />)
@@ -614,5 +626,47 @@ describe('similarity search workflow', () => {
     expect(
       screen.getByRole('button', { name: 'Find Similar Charts' }),
     ).toBeDisabled()
+  })
+
+  it('prevents an older aborted search response from overwriting a newer result', async () => {
+    let resolveFirst!: (value: ReturnType<typeof response>) => void
+    let resolveSecond!: (value: ReturnType<typeof response>) => void
+    const first = new Promise<ReturnType<typeof response>>(
+      (resolve) => (resolveFirst = resolve),
+    )
+    const second = new Promise<ReturnType<typeof response>>(
+      (resolve) => (resolveSecond = resolve),
+    )
+    let searches = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) => {
+        const url = String(input)
+        if (url.includes('/health'))
+          return Promise.resolve(response({ status: 'ok' }))
+        if (url.endsWith('/api/v1/universes'))
+          return Promise.resolve(response({ universes: [] }))
+        if (url.includes('/similarity/search'))
+          return searches++ === 0 ? first : second
+        return Promise.resolve(response(bars()))
+      }),
+    )
+    render(<App />)
+    await loadReference()
+    fireEvent.click(screen.getByRole('button', { name: 'Find Similar Charts' }))
+    fireEvent.change(screen.getByLabelText('Search from'), {
+      target: { value: '2021-01-01' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Find Similar Charts' }))
+    resolveSecond(response(searchSuccess([matches[2]])))
+    expect(
+      await screen.findByRole('heading', { name: 'AAPL' }),
+    ).toBeInTheDocument()
+    resolveFirst(response(searchSuccess([matches[0]])))
+    await Promise.resolve()
+    expect(
+      screen.queryByRole('heading', { name: 'AMD' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'AAPL' })).toBeInTheDocument()
   })
 })

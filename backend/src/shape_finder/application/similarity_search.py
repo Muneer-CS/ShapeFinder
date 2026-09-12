@@ -1,8 +1,11 @@
+import asyncio
+import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
+from time import perf_counter
 from typing import cast
 
 import numpy as np
@@ -33,6 +36,7 @@ MAX_TOP_N = 100
 MAX_UNIVERSE_SYMBOLS = 5_000
 MAX_SCAN_WINDOWS = 2_000_000
 _SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
+logger = logging.getLogger("shape_finder.similarity")
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,7 +231,15 @@ class SimilaritySearchService:
         self._universe_service = universe_service
 
     async def search(self, query: SimilaritySearchQuery) -> SimilaritySearchResult:
+        started = perf_counter()
         normalized = _normalized_query(query)
+        logger.info(
+            "scan_start reference_symbol=%s interval=%s universe=%s candidates=%s",
+            normalized.reference_symbol,
+            normalized.interval.value,
+            normalized.universe.kind.value if normalized.universe else "custom",
+            len(normalized.candidate_symbols),
+        )
         reference = await self._market_data.get_time_series(
             normalized.reference_symbol,
             normalized.reference_start,
@@ -235,7 +247,7 @@ class SimilaritySearchService:
             normalized.interval,
         )
         if normalized.universe and normalized.universe.kind is not UniverseKind.CUSTOM:
-            return await self._search_universe(normalized, reference)
+            return await self._search_universe(normalized, reference, started)
         candidates: list[TimeSeries] = []
         for symbol in normalized.candidate_symbols:
             candidates.append(
@@ -246,9 +258,9 @@ class SimilaritySearchService:
                     normalized.interval,
                 )
             )
-        result = self._scanner.scan(reference, candidates, normalized)
+        result = await asyncio.to_thread(self._scanner.scan, reference, candidates, normalized)
         total = len(normalized.candidate_symbols)
-        return replace(
+        final = replace(
             result,
             statistics=replace(
                 result.statistics,
@@ -258,9 +270,11 @@ class SimilaritySearchService:
                 symbols_skipped=0,
             ),
         )
+        self._log_complete(final, started)
+        return final
 
     async def _search_universe(
-        self, query: SimilaritySearchQuery, reference: TimeSeries
+        self, query: SimilaritySearchQuery, reference: TimeSeries, started: float
     ) -> SimilaritySearchResult:
         if self._repository is None or self._universe_service is None or query.universe is None:
             raise InvalidSimilaritySearchError("Broad-universe search is not configured.")
@@ -293,8 +307,8 @@ class SimilaritySearchService:
             for symbol in eligible
         ]
         resolved_query = replace(query, candidate_symbols=symbols)
-        result = self._scanner.scan(reference, candidates, resolved_query)
-        return replace(
+        result = await asyncio.to_thread(self._scanner.scan, reference, candidates, resolved_query)
+        final = replace(
             result,
             statistics=replace(
                 result.statistics,
@@ -306,6 +320,18 @@ class SimilaritySearchService:
                 symbols_failed=0,
                 universe_stale=stale,
             ),
+        )
+        self._log_complete(final, started)
+        return final
+
+    @staticmethod
+    def _log_complete(result: SimilaritySearchResult, started: float) -> None:
+        logger.info(
+            "scan_end symbols_scanned=%s windows=%s matches=%s duration_ms=%.2f",
+            result.statistics.symbols_scanned,
+            result.statistics.windows_evaluated,
+            result.statistics.matches_returned,
+            (perf_counter() - started) * 1000,
         )
 
 

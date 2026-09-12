@@ -1,10 +1,10 @@
 # ShapeFinder
 
-ShapeFinder is the foundation for a stock-chart similarity application. The future product will compare normalized chart behaviour across securities and historical periods; it is not a forecasting or trading-recommendation tool.
+ShapeFinder 0.1.0 compares normalized stock-chart behaviour across securities and historical periods. It is a local-first research tool, not a forecasting system, probability model, trading signal, or recommendation.
 
-## Current scope: Phase 10
+## Current scope: Phase 11
 
-ShapeFinder supports provider-independent stock universes in addition to the existing custom list of up to 10 tickers. Users can select U.S. common stocks, NASDAQ common stocks, NYSE common stocks, or Custom. Broad searches are deliberately cached-only: ShapeFinder scans the members with complete local history and reports total, eligible, scanned, and skipped counts rather than implying full coverage. Phase 10 adds a quota-conscious real-market validation workflow and hardens isolated catalog-row and daily cache-boundary behavior discovered against Twelve Data. Similarity Engine V1, its weights, the public API, ranking policy, and UI remain unchanged. ShapeFinder still does **not** hydrate an entire market, predict prices, or make recommendations.
+ShapeFinder supports a custom list of up to 10 tickers and cached-only U.S., NASDAQ, and NYSE common-stock universes. Broad results report known, eligible, scanned, and skipped counts rather than implying full-market coverage. Phase 11 adds validated configuration, explicit CORS, safe error envelopes, request IDs, body/timeout/concurrency limits, refresh coalescing, SQLite readiness and integrity checks, structured operational logs, frontend stale-request protection, and a rendering error boundary. Similarity Engine V1 and its 45/30/20/5 weights are unchanged.
 
 ## Architecture
 
@@ -44,13 +44,15 @@ cd backend
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
-python -m pip install -e ".[dev]"
+python -m pip install -r requirements-dev.lock
+python -m pip install -e . --no-deps
 uvicorn shape_finder.main:app --reload
 ```
 
 The API is available at `http://localhost:8000`.
 
 - `GET /api/v1/health` — configuration-independent service health
+- `GET /api/v1/readiness` — local database accessibility and migration readiness
 - `GET /api/v1/market-data/{symbol}?start=...&end=...&interval=...` — normalized OHLCV history
 - `POST /api/v1/similarity/search` — ranked historical matches for up to 10 explicit candidate symbols
 - `GET /api/v1/universes` — available provider-derived universe summaries and freshness
@@ -118,11 +120,11 @@ In a separate terminal:
 
 ```bash
 cd frontend
-npm install
+npm ci --cache .npm-cache
 npm run dev
 ```
 
-Open `http://localhost:5173`. Set `VITE_API_BASE_URL` in an untracked `.env` if the API uses a different origin.
+Open `http://localhost:5173`. Development defaults to `http://localhost:8000`. Set `VITE_API_BASE_URL` in an untracked `frontend/.env.local` when the API uses another absolute HTTP(S) origin. Production defaults to same-origin API requests; malformed or credential-bearing URLs fail clearly.
 
 The workflow supports daily date inputs and timezone-aware intraday date-time inputs for `1min`, `5min`, `15min`, `30min`, `1h`, and `1day`. It validates the ticker and both ranges before requesting data, shows loading and safe failure states, and replaces the previous reference chart after a successful request. The reference chart uses the API's exact closing values without normalization or similarity processing.
 
@@ -147,4 +149,17 @@ pytest
 
 ## Security notes
 
-Market-data credentials are backend-only and represented as secret configuration values. `.env` files are ignored. No credential is needed to start or test the application.
+Market-data credentials are backend-only `SecretStr` configuration and never belong in a `VITE_*` variable. `.env`, SQLite, WAL, build, validation, and stress artifacts are ignored. Public errors contain stable codes, safe messages, and a request ID—not stack traces, SQL/provider payloads, filesystem paths, or credentials. Logs record request/provider/cache/scan categories but never query strings, bodies, keys, or market payloads.
+
+`CORS_ORIGINS` is a JSON list of explicit HTTP(S) origins. Wildcards and malformed origins fail startup; production also rejects an empty list. Expensive scans default to two concurrent requests and 60 seconds, and request bodies default to 64 KiB. These per-process controls complement the existing 5,000-symbol and 2,000,000-window limits; they are not a distributed rate limiter.
+
+See [release hardening](docs/release-hardening.md) for environment behavior, failure/cancellation semantics, dependency findings, and known limitations. See [the release checklist](docs/release-checklist.md) before publishing a build.
+
+## Known limitations
+
+- Intraday candidate windows may span overnight or session boundaries.
+- Named-universe scans include only locally scan-ready histories; there is no background hydration.
+- SQLite and scan admission are process-local; there are no distributed workers or user accounts.
+- Twelve Data is the only implemented live provider and its availability and quotas still apply.
+- A scan deadline returns a bounded response, but already-admitted work finishes safely in the background and retains its concurrency slot until completion.
+- Similarity is an engineered descriptive score, not a predictive probability.

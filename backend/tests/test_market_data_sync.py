@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -70,6 +71,33 @@ async def test_empty_cache_persists_then_historical_request_is_cache_hit(tmp_pat
     second = await service.get_time_series("AAPL", start, end, BarInterval.ONE_DAY)
 
     assert len(first.bars) == len(second.bars) == 3
+    assert provider.calls == [(start, end)]
+
+
+@pytest.mark.anyio
+async def test_concurrent_identical_cache_misses_share_one_refresh(tmp_path: Path) -> None:
+    class SlowProvider(FakeProvider):
+        async def get_historical_bars(
+            self,
+            symbol: str,
+            start: datetime,
+            end: datetime,
+            interval: BarInterval,
+        ) -> TimeSeries:
+            await asyncio.sleep(0.01)
+            return await super().get_historical_bars(symbol, start, end, interval)
+
+    store = await repository(tmp_path)
+    provider = SlowProvider()
+    service = MarketDataService(provider, store, clock=lambda: NOW)
+    start = datetime(2024, 1, 1, tzinfo=UTC)
+    end = datetime(2024, 1, 3, tzinfo=UTC)
+
+    results = await asyncio.gather(
+        *(service.get_time_series("AAPL", start, end, BarInterval.ONE_DAY) for _ in range(8))
+    )
+
+    assert all(len(result.bars) == 3 for result in results)
     assert provider.calls == [(start, end)]
 
 

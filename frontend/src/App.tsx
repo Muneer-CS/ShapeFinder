@@ -61,6 +61,10 @@ const errorMessages: Record<string, string> = {
     'Live market data is not configured, and the required stock data is not available locally.',
   PROVIDER_RATE_LIMITED:
     'The market-data limit was reached. Please try again later.',
+  SEARCH_CAPACITY_EXCEEDED:
+    'The server is already running its maximum number of searches. Please try again shortly.',
+  SEARCH_TIMEOUT:
+    'The search took too long and was stopped. Try a shorter range or smaller universe.',
   PROVIDER_UNAVAILABLE:
     'Market data is temporarily unavailable. Please try again.',
   PROVIDER_AUTHENTICATION_FAILED:
@@ -147,6 +151,7 @@ function App() {
 
   const referenceController = useRef<AbortController | null>(null)
   const searchController = useRef<AbortController | null>(null)
+  const previewControllers = useRef(new Map<string, AbortController>())
 
   useEffect(() => {
     const controller = new AbortController()
@@ -173,12 +178,16 @@ function App() {
     () => () => {
       referenceController.current?.abort()
       searchController.current?.abort()
+      previewControllers.current.forEach((controller) => controller.abort())
+      previewControllers.current.clear()
     },
     [],
   )
 
   function clearSearchResults() {
     searchController.current?.abort()
+    previewControllers.current.forEach((controller) => controller.abort())
+    previewControllers.current.clear()
     setSearch({ kind: 'idle' })
     setSearchError('')
     setSelectedMatch(null)
@@ -239,6 +248,7 @@ function App() {
         interval,
         controller.signal,
       )
+      if (referenceController.current !== controller) return
       setReference(
         data.bars.length
           ? {
@@ -254,6 +264,7 @@ function App() {
           : { kind: 'error', message: errorMessages.NO_DATA },
       )
     } catch (error: unknown) {
+      if (referenceController.current !== controller) return
       if (error instanceof Error && error.name === 'AbortError') return
       setReference({ kind: 'error', message: safeMessage(error) })
     }
@@ -353,8 +364,10 @@ function App() {
         },
         controller.signal,
       )
+      if (searchController.current !== controller) return
       setSearch({ kind: 'success', data })
     } catch (error: unknown) {
+      if (searchController.current !== controller) return
       if (error instanceof Error && error.name === 'AbortError') return
       setSearch({ kind: 'error', message: safeMessage(error) })
     }
@@ -365,19 +378,28 @@ function App() {
     if (previews[key]?.kind === 'loading' || previews[key]?.kind === 'success')
       return
     setPreviews((current) => ({ ...current, [key]: { kind: 'loading' } }))
+    const controller = new AbortController()
+    previewControllers.current.set(key, controller)
     try {
       const data = await getMarketData(
         match.symbol,
         match.start,
         match.end,
         match.interval,
+        controller.signal,
       )
+      if (previewControllers.current.get(key) !== controller) return
       setPreviews((current) => ({
         ...current,
         [key]: data.bars.length ? { kind: 'success', data } : { kind: 'error' },
       }))
-    } catch {
+    } catch (error: unknown) {
+      if (previewControllers.current.get(key) !== controller) return
+      if (error instanceof Error && error.name === 'AbortError') return
       setPreviews((current) => ({ ...current, [key]: { kind: 'error' } }))
+    } finally {
+      if (previewControllers.current.get(key) === controller)
+        previewControllers.current.delete(key)
     }
   }
 
@@ -691,7 +713,7 @@ function App() {
       )}
 
       <footer>
-        <span>Phase 8</span>
+        <span>ShapeFinder 0.1.0</span>
         <span>Engineered chart-shape similarity · No predictions</span>
       </footer>
     </main>
@@ -759,6 +781,7 @@ function SearchResults({
       className="matches-section"
       aria-labelledby="matches-title"
       aria-busy={state.kind === 'loading'}
+      aria-live="polite"
     >
       {state.kind === 'loading' && (
         <EmptyResult loading title="Searching for similar chart patterns…">
@@ -946,7 +969,7 @@ function Comparison({
             </div>
           )}
           {preview?.kind === 'error' && (
-            <div className="comparison-placeholder">
+            <div className="comparison-placeholder" role="status">
               Match chart unavailable.
             </div>
           )}

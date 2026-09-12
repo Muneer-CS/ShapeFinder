@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -99,6 +100,24 @@ class CatalogProvider:
         interval: BarInterval,
     ) -> TimeSeries:
         raise MissingApiKeyError()
+
+
+@pytest.mark.anyio
+async def test_concurrent_universe_reads_share_one_refresh(tmp_path: Path) -> None:
+    class SlowCatalogProvider(CatalogProvider):
+        async def list_stocks(self) -> Sequence[SymbolMetadata]:
+            await asyncio.sleep(0.01)
+            return await super().list_stocks()
+
+    repository = SQLiteMarketDataRepository(tmp_path / "universe-lock.sqlite3")
+    await repository.initialize()
+    provider = SlowCatalogProvider([metadata("AAPL")])
+    service = UniverseService(provider, repository, clock=lambda: NOW)
+
+    results = await asyncio.gather(*(service.list_universes() for _ in range(8)))
+
+    assert all(result[0].total_symbols == 1 for result in results)
+    assert provider.catalog_calls == 1
 
 
 @pytest.mark.anyio

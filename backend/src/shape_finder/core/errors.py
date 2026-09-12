@@ -36,3 +36,15 @@ class MalformedProviderResponseError(MarketDataError):
 
 class NoDataError(MarketDataError):
     pass
+
+
+class ScanTimeoutError(Exception):
+    """Raised when a similarity request exceeds its configured execution budget."""
+
+
+class ScanCapacityError(Exception):
+    """Raised when the process-local expensive-search limit is full."""
+
+
+class ReadinessError(Exception):
+    """Raised when a required local application component is unavailable."""

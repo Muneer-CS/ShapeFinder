@@ -1,3 +1,4 @@
+import logging
 from typing import Final
 
 from fastapi import FastAPI, Request
@@ -14,6 +15,9 @@ from shape_finder.core.errors import (
     NoDataError,
     ProviderNetworkError,
     RateLimitError,
+    ReadinessError,
+    ScanCapacityError,
+    ScanTimeoutError,
     UnsupportedIntervalError,
 )
 from shape_finder.core.similarity_search import InvalidSimilaritySearchError
@@ -37,40 +41,95 @@ ERRORS: Final[dict[type[MarketDataError], tuple[int, str, str]]] = {
     ),
     NoDataError: (404, "NO_DATA", "No market data exists for the requested period."),
 }
+logger = logging.getLogger("shape_finder.errors")
+
+
+def _request_id(request: Request) -> str:
+    return str(getattr(request.state, "request_id", "unavailable"))
+
+
+def _content(code: str, message: str, request: Request) -> dict[str, object]:
+    return {"error": {"code": code, "message": message, "request_id": _request_id(request)}}
+
+
+def _response(
+    request: Request,
+    status: int,
+    code: str,
+    message: str,
+    *,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status,
+        content=_content(code, message, request),
+        headers={"X-Request-ID": _request_id(request), **(headers or {})},
+    )
 
 
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(InvalidSimilaritySearchError)
     async def similarity_search_error(
-        _: Request, error: InvalidSimilaritySearchError
+        request: Request, error: InvalidSimilaritySearchError
     ) -> JSONResponse:
-        return JSONResponse(
-            status_code=422,
-            content={
-                "error": {
-                    "code": "INVALID_SIMILARITY_SEARCH",
-                    "message": str(error),
-                }
-            },
-        )
+        return _response(request, 422, "INVALID_SIMILARITY_SEARCH", str(error))
 
     @app.exception_handler(MarketDataError)
-    async def market_data_error(_: Request, error: MarketDataError) -> JSONResponse:
-        status, code, message = ERRORS[type(error)]
-        return JSONResponse(
-            status_code=status, content={"error": {"code": code, "message": message}}
+    async def market_data_error(request: Request, error: MarketDataError) -> JSONResponse:
+        status, code, message = next(
+            value for error_type, value in ERRORS.items() if isinstance(error, error_type)
         )
+        logger.warning(
+            "handled_provider_failure request_id=%s category=%s",
+            _request_id(request),
+            code,
+        )
+        return _response(request, status, code, message)
 
     @app.exception_handler(RequestValidationError)
-    async def validation_error(_: Request, error: RequestValidationError) -> JSONResponse:
+    async def validation_error(request: Request, error: RequestValidationError) -> JSONResponse:
         fields = sorted({str(item["loc"][-1]) for item in error.errors()})
         suffix = f" Invalid fields: {', '.join(fields)}." if fields else ""
-        return JSONResponse(
-            status_code=422,
-            content={
-                "error": {
-                    "code": "VALIDATION_ERROR",
-                    "message": f"Request validation failed.{suffix}",
-                }
-            },
+        return _response(request, 422, "VALIDATION_ERROR", f"Request validation failed.{suffix}")
+
+    @app.exception_handler(ScanCapacityError)
+    async def capacity_error(request: Request, _: ScanCapacityError) -> JSONResponse:
+        return _response(
+            request,
+            429,
+            "SEARCH_CAPACITY_EXCEEDED",
+            "Too many similarity searches are running. Try again shortly.",
+            headers={"Retry-After": "1"},
+        )
+
+    @app.exception_handler(ScanTimeoutError)
+    async def timeout_error(request: Request, _: ScanTimeoutError) -> JSONResponse:
+        return _response(
+            request,
+            504,
+            "SEARCH_TIMEOUT",
+            "The similarity search exceeded its execution time limit.",
+        )
+
+    @app.exception_handler(ReadinessError)
+    async def readiness_error(request: Request, _: ReadinessError) -> JSONResponse:
+        return _response(
+            request,
+            503,
+            "NOT_READY",
+            "The application is not ready to serve requests.",
+        )
+
+    @app.exception_handler(Exception)
+    async def unexpected_error(request: Request, error: Exception) -> JSONResponse:
+        logger.error(
+            "unexpected_error request_id=%s type=%s",
+            _request_id(request),
+            type(error).__name__,
+        )
+        return _response(
+            request,
+            500,
+            "INTERNAL_SERVER_ERROR",
+            "An unexpected server error occurred.",
         )

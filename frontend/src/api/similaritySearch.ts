@@ -1,4 +1,5 @@
 import { MarketDataApiError, type MarketInterval } from './marketData'
+import { apiBaseUrl } from './config'
 
 export type SimilaritySearchRequest = {
   reference: {
@@ -65,8 +66,6 @@ export type SimilaritySearchResponse = {
 }
 
 type ApiErrorBody = { error?: { code?: string; message?: string } }
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
-
 function isNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }

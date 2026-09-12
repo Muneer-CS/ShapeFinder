@@ -35,8 +35,6 @@ export class MarketDataApiError extends Error {
   }
 }
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
-
 function isTimeSeriesResponse(value: unknown): value is TimeSeriesResponse {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<TimeSeriesResponse>
@@ -86,3 +84,4 @@ export async function getMarketData(
     )
   return body
 }
+import { apiBaseUrl } from './config'

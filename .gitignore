@@ -7,11 +7,13 @@
 frontend/node_modules/
 frontend/dist/
 frontend/coverage/
+frontend/.npm-cache/
 *.tsbuildinfo
 
 # Backend
 backend/.venv/
 backend/.pytest_cache/
+backend/.test-tmp*/
 backend/.mypy_cache/
 backend/.ruff_cache/
 backend/.coverage

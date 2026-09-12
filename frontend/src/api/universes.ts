@@ -1,4 +1,5 @@
 import { MarketDataApiError } from './marketData'
+import { apiBaseUrl } from './config'
 
 export type UniverseKind = 'us_equities' | 'nasdaq' | 'nyse'
 export type UniverseInfo = {
@@ -8,8 +9,6 @@ export type UniverseInfo = {
   refreshed_at: string | null
   stale: boolean
 }
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
 export async function getUniverses(
   signal?: AbortSignal,

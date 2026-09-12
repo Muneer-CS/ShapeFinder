@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
@@ -14,6 +16,7 @@ INTERVAL_DURATION = {
     BarInterval.ONE_DAY: timedelta(days=1),
     BarInterval.ONE_WEEK: timedelta(weeks=1),
 }
+logger = logging.getLogger("shape_finder.market_data")
 
 
 class MarketDataService:
@@ -33,6 +36,7 @@ class MarketDataService:
         self._clock = clock
         self._max_points_per_chunk = max_points_per_chunk
         self._recent_edge_bars = recent_edge_bars
+        self._refresh_locks: dict[tuple[str, BarInterval], asyncio.Lock] = {}
 
     async def get_time_series(
         self,
@@ -43,17 +47,48 @@ class MarketDataService:
     ) -> TimeSeries:
         self._validate_range(start, end)
         symbol = symbol.upper()
+        lock = self._refresh_locks.setdefault((symbol, interval), asyncio.Lock())
+        waited_for_refresh = lock.locked()
+        async with lock:
+            return await self._get_time_series_locked(
+                symbol, start, end, interval, refresh_recent=not waited_for_refresh
+            )
+
+    async def _get_time_series_locked(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+        interval: BarInterval,
+        *,
+        refresh_recent: bool,
+    ) -> TimeSeries:
         coverage = await self._repository.get_coverage(symbol, interval, start, end)
         missing = self._missing_ranges(start, end, interval, coverage)
-        refresh = self._recent_refresh_range(start, end, interval)
+        refresh = self._recent_refresh_range(start, end, interval) if refresh_recent else None
         requested = self._merge_ranges([*missing, *([refresh] if refresh else [])])
         chunks = [chunk for item in requested for chunk in self._chunk_range(*item, interval)]
+
+        logger.info(
+            "cache_lookup symbol=%s interval=%s coverage_ranges=%s fetch_chunks=%s",
+            symbol,
+            interval.value,
+            len(coverage),
+            len(chunks),
+        )
 
         if chunks:
             synced_at = self._clock().astimezone(UTC)
             fetched: list[TimeSeries] = []
             fetched_coverage: list[CoverageRange] = []
             for chunk_start, chunk_end in chunks:
+                logger.info(
+                    "provider_fetch symbol=%s interval=%s start=%s end=%s",
+                    symbol,
+                    interval.value,
+                    chunk_start.isoformat(),
+                    chunk_end.isoformat(),
+                )
                 try:
                     item = await self._provider.get_historical_bars(
                         symbol=symbol,
