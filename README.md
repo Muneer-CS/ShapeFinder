@@ -2,9 +2,9 @@
 
 ShapeFinder is the foundation for a stock-chart similarity application. The future product will compare normalized chart behaviour across securities and historical periods; it is not a forecasting or trading-recommendation tool.
 
-## Current scope: Phase 8
+## Current scope: Phase 9
 
-ShapeFinder now supports provider-independent stock universes in addition to the existing custom list of up to 10 tickers. Users can select U.S. common stocks, NASDAQ common stocks, NYSE common stocks, or Custom. Broad searches are deliberately cached-only: ShapeFinder scans the members with complete local history and reports total, eligible, scanned, and skipped counts rather than implying full coverage. Match charts remain lazy and comparison behavior is unchanged. ShapeFinder still does **not** hydrate an entire market, predict prices, or make recommendations.
+ShapeFinder supports provider-independent stock universes in addition to the existing custom list of up to 10 tickers. Users can select U.S. common stocks, NASDAQ common stocks, NYSE common stocks, or Custom. Broad searches are deliberately cached-only: ShapeFinder scans the members with complete local history and reports total, eligible, scanned, and skipped counts rather than implying full coverage. Phase 9 accelerates the same deterministic Similarity Engine V1 computation with bounded NumPy batches; the formula, public API, ranking policy, and UI are unchanged. ShapeFinder still does **not** hydrate an entire market, predict prices, or make recommendations.
 
 ## Architecture
 
@@ -69,7 +69,9 @@ A broad candidate is scan-ready only when synchronization coverage spans the req
 
 Requests are limited to 5,000 resolved universe symbols and an estimated 2,000,000 windows. Each symbol's passing windows are overlap-suppressed and reduced to at most `top_n` finalists before global ranking. This is equivalent to Phase 6 ranking because overlap suppression is symbol-local, while bounding the cross-symbol candidate pool. The similarity formula and weights are unchanged.
 
-Local deterministic benchmarks (Python 3.12 on the development machine, 30-bar reference, 1,000 bars per candidate) measured 97,100 windows across 100 symbols in 18.120 seconds (5,359 comparisons/second), and 485,500 windows across 500 symbols in 88.888 seconds (5,462 comparisons/second). These are observations, not CI timing guarantees.
+Profiling identified repeated scalar normalization, interpolation, and dot products as the dominant cost. The scanner now converts each candidate series once, creates zero-copy rolling-window views, and evaluates bounded batches of 4,096 windows using vectorized NumPy operations. Invalid, irregular, or extreme inputs retain the canonical scalar path. Batch/scalar component scores are verified within `0.000001`, including flat, inverted, threshold-adjacent, close-ranking, and batch-boundary cases.
+
+Local deterministic benchmarks (30-bar reference, 1,000 bars per candidate) improved from 18.120 to 1.394 seconds for 100 symbols (13.0×) and from 88.888 to 6.531 seconds for 500 symbols (13.6×). A 1,000-symbol scan completed 971,000 comparisons in 12.853 seconds. Traced peak Python memory for the 100-symbol scan was 4.2 MiB. A separate SQLite profile loaded 100,000 cached rows in 1.111 seconds versus a 1.241-second scan, making data retrieval and object materialization a remaining end-to-end bottleneck. These measurements are local observations, not CI timing guarantees. Reproduce them with `python scripts/benchmark_broad_scan.py --symbols 100 --bars 1000`; add `--legacy`, `--memory`, or `--database` for the comparison modes.
 
 ## Local market database
 

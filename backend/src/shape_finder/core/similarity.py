@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Protocol, TypeAlias
+from typing import Protocol, TypeAlias, runtime_checkable
 
 PriceValue: TypeAlias = Decimal | float | int
 
@@ -42,3 +42,14 @@ class SimilarityEngine(Protocol):
         reference: PreparedSimilaritySeries,
         candidate: Sequence[PriceValue],
     ) -> SimilarityScore: ...
+
+
+@runtime_checkable
+class BatchSimilarityEngine(SimilarityEngine, Protocol):
+    """Optional optimized boundary for equal-length candidate batches."""
+
+    def compare_many(
+        self,
+        reference: PreparedSimilaritySeries,
+        candidates: Sequence[Sequence[PriceValue]],
+    ) -> tuple[SimilarityScore, ...]: ...

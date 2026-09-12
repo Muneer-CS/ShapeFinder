@@ -1,6 +1,7 @@
 import asyncio
 import sqlite3
 from collections.abc import Sequence
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -37,7 +38,7 @@ class SQLiteMarketDataRepository:
 
     def _initialize_sync(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -70,7 +71,7 @@ class SQLiteMarketDataRepository:
     def _get_time_series_sync(
         self, symbol: str, interval: BarInterval, start: datetime, end: datetime
     ) -> TimeSeries:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             rows = connection.execute(
                 """
                 SELECT timestamp_utc, open, high, low, close, volume, timezone
@@ -112,7 +113,7 @@ class SQLiteMarketDataRepository:
     def _get_coverage_sync(
         self, symbol: str, interval: BarInterval, start: datetime, end: datetime
     ) -> tuple[CoverageRange, ...]:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             rows = connection.execute(
                 """
                 SELECT start_utc, end_utc, synced_at_utc
@@ -149,7 +150,7 @@ class SQLiteMarketDataRepository:
     ) -> None:
         if len(series) != len(coverage):
             raise ValueError("Each synchronized series requires one coverage range.")
-        with self._connect() as connection, connection:
+        with closing(self._connect()) as connection, connection:
             for item, covered in zip(series, coverage, strict=True):
                 connection.executemany(
                     """
@@ -219,7 +220,7 @@ class SQLiteMarketDataRepository:
         source: str,
     ) -> None:
         refreshed_text = _utc_text(refreshed_at)
-        with self._connect() as connection, connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute("DELETE FROM universe_symbols")
             connection.executemany(
                 """
@@ -258,7 +259,7 @@ class SQLiteMarketDataRepository:
         return await asyncio.to_thread(self._list_universe_symbols_sync)
 
     def _list_universe_symbols_sync(self) -> tuple[SymbolMetadata, ...]:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             rows = connection.execute(
                 """
                 SELECT symbol, name, exchange, country, security_type, currency, active
@@ -283,7 +284,7 @@ class SQLiteMarketDataRepository:
         return await asyncio.to_thread(self._get_universe_refreshed_at_sync)
 
     def _get_universe_refreshed_at_sync(self) -> datetime | None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             row = connection.execute(
                 "SELECT MAX(refreshed_at_utc) AS refreshed_at FROM universe_refresh"
             ).fetchone()
@@ -321,7 +322,7 @@ class SQLiteMarketDataRepository:
         start_text, end_text = _utc_text(start), _utc_text(end)
         coverage: dict[str, list[tuple[str, str]]] = {symbol: [] for symbol in wanted}
         counts: dict[str, int] = {}
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             for offset in range(0, len(wanted), 400):
                 batch = wanted[offset : offset + 400]
                 placeholders = ",".join("?" for _ in batch)

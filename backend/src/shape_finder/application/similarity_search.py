@@ -3,12 +3,21 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import cast
+
+import numpy as np
 
 from shape_finder.application.market_data_service import MarketDataService
 from shape_finder.application.universe import UniverseService
 from shape_finder.core.market_data import PriceBar, TimeSeries
 from shape_finder.core.persistence import MarketDataRepository
-from shape_finder.core.similarity import SimilarityEngine
+from shape_finder.core.similarity import (
+    BatchSimilarityEngine,
+    PreparedSimilaritySeries,
+    PriceValue,
+    SimilarityEngine,
+    SimilarityScore,
+)
 from shape_finder.core.similarity_search import (
     InvalidSimilaritySearchError,
     ReferenceSummary,
@@ -42,15 +51,21 @@ class HistoricalSimilarityScanner:
         stride: int = 1,
         overlap_threshold: float = 0.5,
         self_overlap_threshold: float = 0.5,
+        batch_size: int = 4096,
+        use_batch: bool = True,
     ) -> None:
         if stride < 1:
             raise InvalidSimilaritySearchError("Stride must be at least one bar.")
         if not 0 <= overlap_threshold <= 1 or not 0 <= self_overlap_threshold <= 1:
             raise InvalidSimilaritySearchError("Overlap thresholds must be between 0 and 1.")
+        if batch_size < 1:
+            raise InvalidSimilaritySearchError("Batch size must be at least one window.")
         self._engine = engine
         self._stride = stride
         self._overlap_threshold = overlap_threshold
         self._self_overlap_threshold = self_overlap_threshold
+        self._batch_size = batch_size
+        self._use_batch = use_batch
 
     def scan(
         self,
@@ -86,23 +101,26 @@ class HistoricalSimilarityScanner:
             )
             if len(bars) < window_length:
                 continue
+            offsets = list(range(0, len(bars) - window_length + 1, self._stride))
+            if candidate.symbol.upper() == reference.symbol.upper():
+                offsets = [
+                    offset
+                    for offset in offsets
+                    if _overlap_ratio(
+                        frozenset(bar.timestamp for bar in bars[offset : offset + window_length]),
+                        reference_timestamps,
+                    )
+                    <= self._self_overlap_threshold
+                ]
+            scored = self._score_windows(prepared_reference, bars, window_length, offsets)
+            windows_evaluated += len(scored)
             candidate_ranked: list[_ScoredWindow] = []
-            for offset in range(0, len(bars) - window_length + 1, self._stride):
-                window = bars[offset : offset + window_length]
-                timestamps = frozenset(bar.timestamp for bar in window)
-                if (
-                    candidate.symbol.upper() == reference.symbol.upper()
-                    and _overlap_ratio(timestamps, reference_timestamps)
-                    > self._self_overlap_threshold
-                ):
-                    continue
-                score = self._engine.compare_prepared(
-                    prepared_reference, tuple(bar.close for bar in window)
-                )
-                windows_evaluated += 1
+            for offset, score in scored:
                 if score.overall_score < threshold:
                     continue
                 windows_passing += 1
+                window = bars[offset : offset + window_length]
+                timestamps = frozenset(bar.timestamp for bar in window)
                 candidate_ranked.append(
                     _ScoredWindow(
                         match=SimilarityMatch(
@@ -157,6 +175,40 @@ class HistoricalSimilarityScanner:
                 matches_returned=len(matches),
             ),
         )
+
+    def _score_windows(
+        self,
+        reference: PreparedSimilaritySeries,
+        bars: Sequence[PriceBar],
+        window_length: int,
+        offsets: Sequence[int],
+    ) -> list[tuple[int, SimilarityScore]]:
+        if not offsets:
+            return []
+        if self._use_batch and isinstance(self._engine, BatchSimilarityEngine):
+            closes = np.fromiter((float(bar.close) for bar in bars), dtype=np.float64)
+            if np.all(np.isfinite(closes)) and np.all(closes > 0):
+                views = np.lib.stride_tricks.sliding_window_view(closes, window_length)
+                results: list[tuple[int, SimilarityScore]] = []
+                for start in range(0, len(offsets), self._batch_size):
+                    batch_offsets = offsets[start : start + self._batch_size]
+                    windows = views[np.asarray(batch_offsets, dtype=np.intp)]
+                    scores = self._engine.compare_many(
+                        reference,
+                        cast(Sequence[Sequence[PriceValue]], windows),
+                    )
+                    results.extend(zip(batch_offsets, scores, strict=True))
+                return results
+        return [
+            (
+                offset,
+                self._engine.compare_prepared(
+                    reference,
+                    tuple(bar.close for bar in bars[offset : offset + window_length]),
+                ),
+            )
+            for offset in offsets
+        ]
 
 
 class SimilaritySearchService:

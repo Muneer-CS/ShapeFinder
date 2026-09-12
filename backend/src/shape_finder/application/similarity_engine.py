@@ -1,6 +1,11 @@
 import math
 from collections.abc import Sequence
 from decimal import Decimal, InvalidOperation, localcontext
+from functools import lru_cache
+from typing import cast
+
+import numpy as np
+from numpy.typing import NDArray
 
 from shape_finder.core.similarity import (
     PreparedSimilaritySeries,
@@ -89,6 +94,114 @@ class ChartSimilarityEngine:
             error_score=_bounded(error_score),
             amplitude_score=_bounded(amplitude_score),
         )
+
+    def compare_many(
+        self,
+        reference: PreparedSimilaritySeries,
+        candidates: Sequence[Sequence[PriceValue]],
+    ) -> tuple[SimilarityScore, ...]:
+        """Compare equal-length windows in bounded NumPy batches.
+
+        Irregular, invalid, boolean, or extreme inputs deliberately fall back to the
+        canonical scalar implementation so its validation and Decimal semantics remain
+        the single-pair contract.
+        """
+        array_input = isinstance(candidates, np.ndarray)
+        rows = tuple(candidates)
+        if not rows:
+            return ()
+        if not array_input and any(type(value) is bool for row in rows for value in row):
+            return tuple(self.compare_prepared(reference, row) for row in rows)
+        try:
+            raw = np.asarray(rows)
+            if raw.dtype.kind == "b":
+                raise ValueError
+            values = np.asarray(raw, dtype=np.float64)
+        except (TypeError, ValueError, OverflowError):
+            return tuple(self.compare_prepared(reference, row) for row in rows)
+        if (
+            values.ndim != 2
+            or values.shape[1] < 2
+            or not np.all(np.isfinite(values))
+            or not np.all(values > 0)
+        ):
+            return tuple(self.compare_prepared(reference, row) for row in rows)
+
+        left, right, fraction = _interpolation_plan(values.shape[1])
+        paths = np.log(values) - np.log(values[:, :1])
+        aligned = paths[:, left] * (1.0 - fraction) + paths[:, right] * fraction
+        centered = aligned - np.mean(aligned, axis=1, keepdims=True)
+        amplitudes = np.sqrt(np.mean(centered * centered, axis=1))
+        flats = amplitudes <= _FLAT_TOLERANCE
+        results: list[SimilarityScore | None] = [None] * len(rows)
+
+        both_flat = flats if reference.flat else np.zeros_like(flats)
+        for index in np.flatnonzero(both_flat):
+            results[int(index)] = SimilarityScore(100.0, 100.0, 100.0, 100.0, 100.0)
+        incompatible_flat = ~flats if reference.flat else flats
+        for index in np.flatnonzero(incompatible_flat):
+            results[int(index)] = SimilarityScore(0.0, 0.0, 0.0, 0.0, 0.0)
+
+        active = np.array([], dtype=np.intp) if reference.flat else np.flatnonzero(~flats)
+        if active.size:
+            candidate_shapes = centered[active] / amplitudes[active, None]
+            reference_shape = np.asarray(reference.shape, dtype=np.float64)
+            reference_slopes = np.asarray(reference.slopes, dtype=np.float64)
+            candidate_slopes = np.diff(candidate_shapes, axis=1)
+
+            shape_cosines = _batch_cosine(candidate_shapes, reference_shape)
+            direction_cosines = _batch_cosine(candidate_slopes, reference_slopes)
+            shape_scores = 50.0 * (shape_cosines + 1.0)
+            direction_scores = 50.0 * (direction_cosines + 1.0)
+
+            candidate_norms = np.sum(candidate_shapes * candidate_shapes, axis=1)
+            fitted_scales = np.maximum(0.0, (candidate_shapes @ reference_shape) / candidate_norms)
+            residuals = reference_shape - fitted_scales[:, None] * candidate_shapes
+            fitted_errors = np.sqrt(np.mean(residuals * residuals, axis=1))
+            error_scores = 100.0 * np.exp(-2.0 * fitted_errors)
+            amplitude_scores = 100.0 * (
+                np.minimum(reference.amplitude, amplitudes[active])
+                / np.maximum(reference.amplitude, amplitudes[active])
+            )
+            overall_scores = (
+                _WEIGHTS["shape"] * shape_scores
+                + _WEIGHTS["direction"] * direction_scores
+                + _WEIGHTS["error"] * error_scores
+                + _WEIGHTS["amplitude"] * amplitude_scores
+            )
+            for position, index in enumerate(active):
+                results[int(index)] = SimilarityScore(
+                    overall_score=_bounded(float(overall_scores[position])),
+                    shape_score=_bounded(float(shape_scores[position])),
+                    direction_score=_bounded(float(direction_scores[position])),
+                    error_score=_bounded(float(error_scores[position])),
+                    amplitude_score=_bounded(float(amplitude_scores[position])),
+                )
+        return tuple(result for result in results if result is not None)
+
+
+@lru_cache(maxsize=32)
+def _interpolation_plan(
+    length: int,
+) -> tuple[NDArray[np.intp], NDArray[np.intp], NDArray[np.float64]]:
+    positions = np.arange(_POINTS, dtype=np.float64) * (length - 1) / (_POINTS - 1)
+    left = np.floor(positions).astype(np.intp)
+    right = np.minimum(left + 1, length - 1)
+    return left, right, positions - left
+
+
+def _batch_cosine(
+    candidates: NDArray[np.float64], reference: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    numerators = candidates @ reference
+    denominators = np.sqrt(np.sum(candidates * candidates, axis=1) * np.sum(reference * reference))
+    values = np.divide(
+        numerators,
+        denominators,
+        out=np.zeros_like(numerators),
+        where=denominators > _FLAT_TOLERANCE,
+    )
+    return cast(NDArray[np.float64], np.clip(values, -1.0, 1.0))
 
 
 def _log_relative_path(values: Sequence[PriceValue]) -> list[float]:

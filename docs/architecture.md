@@ -47,7 +47,25 @@ Migration 2 adds normalized `universe_symbols` and `universe_refresh` tables. A 
 
 Broad search is cached-only. Readiness performs batched SQL queries over `market_data_coverage` and grouped bar counts, requiring complete range coverage, exact interval, and at least the reference bar count. It then loads only eligible series. Missing symbols are counted as skipped, not fetched or failed, and the response never presents partial coverage as full. Phase 8 has no hydration mode; this avoids accidental quota consumption.
 
-The request guard rejects more than 5,000 resolved symbols or an estimate above 2,000,000 windows. Scanner scoring remains single-process and deterministic. To reduce memory without changing ranking, each symbol is independently sorted, overlap-suppressed, and trimmed to `top_n` before global sorting. Since overlap suppression never crosses symbols, no possible global top-N result is discarded. CPU scoring remains the main measured bottleneck at roughly 5.4k comparisons/second; distributed work and background queues remain out of scope.
+The request guard rejects more than 5,000 resolved symbols or an estimate above 2,000,000 windows. Scanner scoring remains single-process and deterministic. To reduce memory without changing ranking, each symbol is independently sorted, overlap-suppressed, and trimmed to `top_n` before global sorting. Since overlap suppression never crosses symbols, no possible global top-N result is discarded. Distributed work and background queues remain out of scope.
+
+### Phase 9 scanner optimization
+
+A `cProfile` baseline showed that scoring—not window enumeration, ranking, or overlap suppression—dominated broad scans. Within scoring, repeated preparation of each candidate window, log-relative normalization, 64-point interpolation, and scalar dot products accounted for nearly all runtime.
+
+`BatchSimilarityEngine` is an optional core capability, so alternative engines can keep using the original scalar protocol. `ChartSimilarityEngine.compare_many` applies the exact V1 weights and policies to equal-length windows with NumPy: it normalizes the whole batch, reuses a cached interpolation plan for each input length, and vectorizes shape, direction, fitted-error, and amplitude components. The scanner converts one symbol's closes to a contiguous float array once, obtains rolling windows through `sliding_window_view`, and materializes at most 4,096 indexed windows per batch. This bounds temporary memory while retaining deterministic symbol order, timestamps, filtering, overlap suppression, tie-breaking, and final-window inclusion. Non-finite, non-positive, boolean, ragged, or extreme inputs fall back to the canonical scalar implementation.
+
+Equivalence tests compare every score component against repeated scalar evaluation with an absolute tolerance of `0.000001`, matching the public six-decimal score precision. They cover deterministic randomized inputs, flat and inverted paths, batch sizes on both sides of boundaries, near-threshold cases, close ranks, and a larger multi-symbol scan. Existing scanner and API tests continue to exercise self-match exclusion, overlap suppression, final-window behavior, and response compatibility.
+
+Local deterministic results for a 30-bar reference and 1,000 bars per candidate were:
+
+| Symbols | Windows | Phase 8 scalar | Phase 9 batch | Speedup |
+| ---: | ---: | ---: | ---: | ---: |
+| 100 | 97,100 | 18.120 s | 1.394 s | 13.0× |
+| 500 | 485,500 | 88.888 s | 6.531 s | 13.6× |
+| 1,000 | 971,000 | not recorded | 12.853 s | — |
+
+The 100-symbol scan used 4.2 MiB peak traced Python memory. In a separate end-to-end diagnostic, SQLite returned and materialized 100,000 cached bars in 1.111 seconds and the subsequent scan took 1.241 seconds. Database reads, domain-object materialization, and six-decimal public-score rounding/object construction are therefore the main remaining local costs. Safety limits remain 5,000 symbols and 2,000,000 estimated windows; Phase 9 does not add multiprocessing or change the API/UI.
 
 ## Backend packages
 
@@ -145,4 +163,4 @@ Twelve Data-specific error bodies are translated to stable internal exceptions. 
 
 ## Phase boundary
 
-Phase 8 adds provider-derived U.S. stock universes, cached metadata, efficient readiness checks, truthful broad-scan coverage, safety limits, and the search-scope UI. Automatic or background hydration, authoritative index membership, result persistence, prediction, distributed workers, deployment, and authentication remain out of scope.
+Phase 9 adds bounded vectorized similarity scanning, strict scalar-equivalence coverage, repeatable performance/memory/database benchmarks, and deterministic SQLite connection cleanup. The Similarity Engine V1 formula, public API, frontend behavior, coverage semantics, and Phase 8 safety limits remain unchanged. Automatic or background hydration, authoritative index membership, result persistence, prediction, distributed workers, deployment, and authentication remain out of scope.
