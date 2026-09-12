@@ -112,6 +112,45 @@ h1 {
   font-size: 1.05rem;
   line-height: 1.6;
 }
+.workflow-guide {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 2rem 0 0;
+  padding: 0;
+  counter-reset: workflow;
+}
+.workflow-guide p {
+  position: relative;
+  min-height: 4.5rem;
+  margin: 0;
+  padding: 0.8rem 0.8rem 0.8rem 2.65rem;
+  border: 1px solid #29483f;
+  border-radius: 0.7rem;
+  color: #a9bbb5;
+  background: #0a1714b8;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  counter-increment: workflow;
+}
+.workflow-guide p::before {
+  position: absolute;
+  left: 0.8rem;
+  top: 0.78rem;
+  color: #6ee7b7;
+  content: counter(workflow, decimal-leading-zero);
+  font-weight: 800;
+}
+.connection-notice {
+  margin: -0.75rem 0 1.25rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #7a433c;
+  border-left: 3px solid #f99b8d;
+  border-radius: 0.6rem;
+  color: #e6d1cc;
+  background: #2b1715;
+  font-size: 0.9rem;
+}
 .reference-form,
 .search-form {
   margin-bottom: 1.25rem;
@@ -533,6 +572,9 @@ button:disabled {
   color: #6ee7b7;
   font-size: 1.55rem;
 }
+.match-summary > strong b {
+  font: inherit;
+}
 .match-summary > strong span {
   color: #8ea39b;
   font-size: 0.72rem;
@@ -591,6 +633,18 @@ button:disabled {
   margin: 0;
   color: #d7e6e0;
   font-weight: 700;
+}
+.match-actions dl span {
+  color: #71877f;
+  font-size: 0.7rem;
+  line-height: 1.25;
+}
+.score-note {
+  max-width: 36rem;
+  margin: 0.8rem 0 0;
+  color: #82968f;
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
 .match-actions > button {
   min-height: 2.5rem;
@@ -652,6 +706,12 @@ button:disabled {
   height: 20rem;
   margin-top: 1rem;
 }
+.chart-loading {
+  display: grid;
+  place-items: center;
+  color: #82968f;
+  font-size: 0.85rem;
+}
 footer {
   min-height: 4.5rem;
   display: flex;
@@ -664,6 +724,9 @@ footer {
   text-transform: uppercase;
 }
 @media (max-width: 900px) {
+  .workflow-guide {
+    grid-template-columns: 1fr 1fr;
+  }
   .reference-config,
   .search-config {
     grid-template-columns: 1fr 1fr;
@@ -677,6 +740,12 @@ footer {
   }
 }
 @media (max-width: 650px) {
+  .workflow-guide {
+    grid-template-columns: 1fr;
+  }
+  .workflow-guide p {
+    min-height: auto;
+  }
   .scope-options {
     grid-template-columns: 1fr 1fr;
   }

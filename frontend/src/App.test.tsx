@@ -184,6 +184,7 @@ describe('reference workflow', () => {
     )
     render(<App />)
     expect(await screen.findByText('API unavailable')).toBeInTheDocument()
+    expect(await screen.findByText('Backend unavailable.')).toBeInTheDocument()
     expect(
       await screen.findByText(/Universe metadata is unavailable/),
     ).toBeInTheDocument()
@@ -196,6 +197,9 @@ describe('reference workflow', () => {
       screen.getByRole('heading', { name: 'Reference' }),
     ).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Search' })).toBeInTheDocument()
+    expect(screen.getByLabelText('How ShapeFinder works')).toHaveTextContent(
+      'Choose a search period and stock universe.',
+    )
     expect(screen.getByLabelText('Reference from')).toHaveAttribute(
       'type',
       'date',
@@ -518,6 +522,11 @@ describe('similarity search workflow', () => {
     fireEvent.click(within(cards[0]).getByText('Score details'))
     expect(within(cards[0]).getByText('97.1')).toBeInTheDocument()
     expect(within(cards[0]).getByText('92.4')).toBeInTheDocument()
+    expect(within(cards[0]).getByText('overall contour')).toBeInTheDocument()
+    expect(within(cards[0]).getByText('point-by-point fit')).toBeInTheDocument()
+    expect(
+      within(cards[0]).getByText(/not probability or confidence/),
+    ).toBeInTheDocument()
   })
 
   it('shows a successful zero-match state rather than an error', async () => {

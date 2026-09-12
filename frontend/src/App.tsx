@@ -1,21 +1,13 @@
 import {
   FormEvent,
   KeyboardEvent,
+  lazy,
+  Suspense,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react'
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
 import { getHealth } from './api/health'
 import {
   getMarketData,
@@ -53,6 +45,8 @@ type PreviewState =
   | { kind: 'loading' }
   | { kind: 'success'; data: TimeSeriesResponse }
   | { kind: 'error' }
+
+const ChartVisuals = lazy(() => import('./ChartVisuals'))
 
 const errorMessages: Record<string, string> = {
   INVALID_SYMBOL: 'We could not find that ticker. Check it and try again.',
@@ -429,12 +423,25 @@ function App() {
 
       <section className="page-heading">
         <p className="eyebrow">Historical pattern research</p>
-        <h1>Find charts that moved alike.</h1>
+        <h1>Find historical stock charts with similar price patterns.</h1>
         <p>
-          Choose the shape you want to match, then search selected stocks for
-          similar historical behavior—not similar prices.
+          Compare chart shapes across earlier market periods. ShapeFinder
+          describes historical similarity—it does not predict future prices.
         </p>
+        <div className="workflow-guide" aria-label="How ShapeFinder works">
+          <p>Choose a stock and reference period.</p>
+          <p>Load the reference chart.</p>
+          <p>Choose a search period and stock universe.</p>
+          <p>Find and compare similar historical charts.</p>
+        </div>
       </section>
+
+      {connection === 'offline' && (
+        <div className="connection-notice" role="alert">
+          <strong>Backend unavailable.</strong> Start the ShapeFinder API, then
+          refresh this page. Search and chart loading need an API connection.
+        </div>
+      )}
 
       <form className="reference-form" onSubmit={loadReference} noValidate>
         <section
@@ -521,7 +528,7 @@ function App() {
             02
           </div>
           <div className="section-heading">
-            <p className="eyebrow">Where should ShapeFinder look?</p>
+            <p className="eyebrow">When and where should ShapeFinder look?</p>
             <h2 id="search-title">Search</h2>
           </div>
           <div className="field">
@@ -853,8 +860,8 @@ function SearchResults({
                         </p>
                       </div>
                       <strong>
-                        {match.overall_score.toFixed(1)}
-                        <span>% similar</span>
+                        <b>{match.overall_score.toFixed(1)}</b>
+                        <span>% similarity</span>
                       </strong>
                     </div>
                     <div className="preview-shell">
@@ -888,17 +895,31 @@ function SearchResults({
                       <details>
                         <summary>Score details</summary>
                         <dl>
-                          <Score label="Shape" value={match.components.shape} />
+                          <Score
+                            label="Shape"
+                            description="overall contour"
+                            value={match.components.shape}
+                          />
                           <Score
                             label="Direction"
+                            description="up/down movement"
                             value={match.components.direction}
                           />
-                          <Score label="Path" value={match.components.error} />
+                          <Score
+                            label="Path"
+                            description="point-by-point fit"
+                            value={match.components.error}
+                          />
                           <Score
                             label="Amplitude"
+                            description="relative move size"
                             value={match.components.amplitude}
                           />
                         </dl>
+                        <p className="score-note">
+                          Component scores describe historical chart similarity,
+                          not probability or confidence.
+                        </p>
                       </details>
                       <button
                         type="button"
@@ -941,7 +962,7 @@ function Comparison({
             {reference.data.symbol} <span>versus</span> {match.symbol}
           </h2>
         </div>
-        <strong>{match.overall_score.toFixed(1)}% similar</strong>
+        <strong>{match.overall_score.toFixed(1)}% similarity</strong>
       </div>
       <div className="comparison-grid">
         <article>
@@ -991,53 +1012,15 @@ function Comparison({
               or the scoring calculation
             </p>
           </div>
-          <div
-            className="overlay-chart"
-            role="img"
-            aria-label={`${reference.data.symbol} and ${match.symbol} rebased shape overlay`}
-          >
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={overlay}
-                margin={{ top: 10, right: 18, bottom: 4, left: 0 }}
-              >
-                <CartesianGrid stroke="#203a33" vertical={false} />
-                <XAxis dataKey="index" hide />
-                <YAxis
-                  tick={{ fill: '#82968f', fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={52}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: '#10231e',
-                    border: '1px solid #35564d',
-                    borderRadius: 8,
-                  }}
-                />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="reference"
-                  name={reference.data.symbol}
-                  stroke="#6ee7b7"
-                  strokeWidth={2.5}
-                  dot={false}
-                  isAnimationActive={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="match"
-                  name={match.symbol}
-                  stroke="#f4c95d"
-                  strokeWidth={2.5}
-                  dot={false}
-                  isAnimationActive={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          <Suspense fallback={<ChartLoading compact />}>
+            <ChartVisuals
+              kind="overlay"
+              overlay={overlay}
+              referenceSymbol={reference.data.symbol}
+              matchSymbol={match.symbol}
+              label={`${reference.data.symbol} and ${match.symbol} rebased shape overlay`}
+            />
+          </Suspense>
         </article>
       )}
     </section>
@@ -1056,11 +1039,20 @@ function overlayData(reference: TimeSeriesResponse, match: TimeSeriesResponse) {
   }))
 }
 
-function Score({ label, value }: { label: string; value: number }) {
+function Score({
+  label,
+  description,
+  value,
+}: {
+  label: string
+  description: string
+  value: number
+}) {
   return (
     <div>
       <dt>{label}</dt>
       <dd>{value.toFixed(1)}</dd>
+      <span>{description}</span>
     </div>
   )
 }
@@ -1108,69 +1100,25 @@ function PriceChart({
   label: string
   compact?: boolean
 }) {
-  const data = series.bars.map((bar) => ({
-    timestamp: bar.timestamp,
-    close: Number(bar.close),
-  }))
+  return (
+    <Suspense fallback={<ChartLoading compact={compact} />}>
+      <ChartVisuals
+        kind="price"
+        series={series}
+        label={label}
+        compact={compact}
+      />
+    </Suspense>
+  )
+}
+
+function ChartLoading({ compact = false }: { compact?: boolean }) {
   return (
     <div
-      className={`chart${compact ? ' chart-compact' : ''}`}
-      role="img"
-      aria-label={label}
+      className={`chart chart-loading${compact ? ' chart-compact' : ''}`}
+      role="status"
     >
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart
-          data={data}
-          margin={{ top: 12, right: 18, bottom: 8, left: 2 }}
-        >
-          <CartesianGrid stroke="#203a33" vertical={false} />
-          <XAxis
-            dataKey="timestamp"
-            tickFormatter={(value: string) =>
-              displayDate(value, series.interval)
-            }
-            minTickGap={48}
-            tick={{ fill: '#82968f', fontSize: 12 }}
-            axisLine={false}
-            tickLine={false}
-          />
-          <YAxis
-            domain={['auto', 'auto']}
-            tick={{ fill: '#82968f', fontSize: 12 }}
-            axisLine={false}
-            tickLine={false}
-            width={58}
-            tickFormatter={(value: number) =>
-              value.toLocaleString(undefined, { maximumFractionDigits: 2 })
-            }
-          />
-          <Tooltip
-            labelFormatter={(value) =>
-              displayDate(String(value), series.interval)
-            }
-            formatter={(value) => [
-              Number(value).toLocaleString(undefined, {
-                maximumFractionDigits: 4,
-              }),
-              'Close',
-            ]}
-            contentStyle={{
-              background: '#10231e',
-              border: '1px solid #35564d',
-              borderRadius: 8,
-            }}
-          />
-          <Line
-            type="monotone"
-            dataKey="close"
-            stroke="#6ee7b7"
-            strokeWidth={2.5}
-            dot={data.length < 3}
-            activeDot={{ r: 5 }}
-            isAnimationActive={false}
-          />
-        </LineChart>
-      </ResponsiveContainer>
+      Preparing chart…
     </div>
   )
 }

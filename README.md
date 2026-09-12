@@ -1,41 +1,56 @@
 # ShapeFinder
 
-ShapeFinder 0.1.0 compares normalized stock-chart behaviour across securities and historical periods. It is a local-first research tool, not a forecasting system, probability model, trading signal, or recommendation.
+Find historical stock charts with similar price patterns.
 
-## Current scope: Phase 11
+ShapeFinder is a local-first research application that compares a reference price chart with earlier chart windows across selected stocks. It ranks descriptive shape similarity; it does not forecast prices or produce trading signals.
 
-ShapeFinder supports a custom list of up to 10 tickers and cached-only U.S., NASDAQ, and NYSE common-stock universes. Broad results report known, eligible, scanned, and skipped counts rather than implying full-market coverage. Phase 11 adds validated configuration, explicit CORS, safe error envelopes, request IDs, body/timeout/concurrency limits, refresh coalescing, SQLite readiness and integrity checks, structured operational logs, frontend stale-request protection, and a rendering error boundary. Similarity Engine V1 and its 45/30/20/5 weights are unchanged.
+## What it does
+
+1. Choose a stock, date range, and daily or intraday interval as the **reference** pattern.
+2. Choose a separate **search period** and either a custom ticker list or cached stock **universe**.
+3. Search historical windows and review ranked ShapeFinder similarity scores.
+4. Load match previews, inspect score components, and compare actual-price charts with a rebased-to-100 overlay.
+
+## Features
+
+- Daily and intraday (`1min`, `5min`, `15min`, `30min`, `1h`, `1day`) reference charts
+- Custom searches for up to 10 tickers
+- Cached-only U.S. Stocks, NASDAQ, and NYSE universe searches
+- Ranked results with Shape, Direction, Path, and Amplitude components
+- Truthful named-universe coverage and stale-cache reporting
+- Lazy match previews, selected comparison charts, and a normalized overlay
+- SQLite OHLCV and universe caching with transactional migrations
+- Safe API errors, request IDs, readiness/liveness checks, CORS validation, and bounded scans
+- Responsive, keyboard-accessible React interface with stale-request protection
 
 ## Architecture
 
 ```text
-frontend (React UI + typed API client + Recharts)
-        │ HTTP
-backend API routes
-        │
-application services
-        ├── market-data repository protocol → SQLite
-        ├── market-data provider protocol → Twelve Data
-        ├── chart similarity engine → deterministic close-price analysis
-        ├── historical scanner → windowing, ranking, overlap suppression
-        └── repository protocol
+React + TypeScript + Vite + Recharts
+                    │ HTTP
+FastAPI routes → application services → provider-neutral core
+                    ├─ Twelve Data adapter
+                    ├─ SQLite repository
+                    └─ NumPy similarity scanner
 ```
 
-The core layer contains provider-neutral domain types. `MarketDataService` coordinates `MarketDataRepository` and `MarketDataProvider`; it does not import SQLite or Twelve Data. This keeps both the data vendor and database replaceable, including a later migration to PostgreSQL.
+The domain and application layers do not depend on Twelve Data or SQLite. See [docs/architecture.md](docs/architecture.md) for boundaries, data flow, cache behavior, and extension points.
 
-`ChartSimilarityEngine` implements the core `SimilarityEngine` protocol without importing FastAPI, SQLite, Twelve Data, React, or HTTP. It accepts two close-price sequences and returns the overall score plus shape, direction, fitted-error, and amplitude components. See [the architecture notes](docs/architecture.md#similarity-engine-v1) for the exact formula and policies.
+## Requirements
 
-## Project layout
+- Node.js 20+
+- Python 3.11+
+- A Twelve Data API key for uncached live market data
 
-- `frontend/` — React, TypeScript, Vite, Recharts, Vitest, ESLint, and Prettier
-- `backend/src/shape_finder/` — FastAPI entrypoint and separated core, application, API, and infrastructure packages
-- `backend/tests/` — backend API tests
-- `docs/architecture.md` — boundaries and future extension points
-- `.env.example` — safe local configuration template
+## Local setup
 
-## Local development
+Clone the repository, then create a local environment file:
 
-Prerequisites: Node.js 20+ and Python 3.11+.
+```bash
+cp .env.example .env
+```
+
+On Windows PowerShell, use `Copy-Item .env.example .env`. The `.env` file is ignored by Git.
 
 ### Backend
 
@@ -49,117 +64,130 @@ python -m pip install -e . --no-deps
 uvicorn shape_finder.main:app --reload
 ```
 
-The API is available at `http://localhost:8000`.
-
-- `GET /api/v1/health` — configuration-independent service health
-- `GET /api/v1/readiness` — local database accessibility and migration readiness
-- `GET /api/v1/market-data/{symbol}?start=...&end=...&interval=...` — normalized OHLCV history
-- `POST /api/v1/similarity/search` — ranked historical matches for up to 10 explicit candidate symbols
-- `GET /api/v1/universes` — available provider-derived universe summaries and freshness
-
-The market-data endpoint requires timezone-aware ISO 8601 `start` and `end` values. Supported intervals are `1min`, `5min`, `15min`, `30min`, `1h`, and `1day`.
-
-The similarity endpoint remains backward-compatible with a `search.symbols` custom list. Broad mode instead sends `search.universe.kind` as `us_equities`, `nasdaq`, or `nyse`. It returns the loaded reference summary, enforced search range, ranked matches with score components, and truthful coverage statistics. All timestamps must include a timezone.
-
-## Stock universes and broad scans
-
-Universe metadata comes from Twelve Data's official [`/stocks` reference-data endpoint](https://support.twelvedata.com/en/articles/5620513-how-to-find-all-available-symbols-at-twelve-data). The adapter requests U.S. common stocks and the application independently applies a conservative policy: country must be U.S., type must be exactly `Common Stock`, and the record must be active when active status is supplied. ETFs, ADRs/depositary receipts, preferred shares, warrants, rights, funds, REITs, and other instrument classes are excluded. Duplicate tickers are collapsed deterministically, preferring NASDAQ and then NYSE metadata.
-
-The normalized catalog is replaced transactionally in SQLite after a successful refresh and reused for 24 hours by default (`UNIVERSE_TTL_HOURS`). A successful refresh removes symbols absent from the new snapshot. If refresh fails, an existing stale snapshot remains usable and the API/UI marks it stale; with neither a cache nor provider access, universe metadata returns a safe provider error. S&P 500 membership is deferred because Twelve Data's supported-stock list does not provide authoritative index membership, and Phase 8 does not scrape or embed an unmaintainable list.
-
-A broad candidate is scan-ready only when synchronization coverage spans the requested search range for the exact interval and at least as many cached bars exist as in the loaded reference. Readiness uses batched coverage/count queries rather than loading every bar. Broad searches never fetch missing candidate histories in Phase 8; only the reference may use the normal cache-aware provider path. This cached-only default consumes no surprise quota. Bounded hydration is intentionally deferred until quota budgeting and an explicit UX can be designed together.
-
-Requests are limited to 5,000 resolved universe symbols and an estimated 2,000,000 windows. Each symbol's passing windows are overlap-suppressed and reduced to at most `top_n` finalists before global ranking. This is equivalent to Phase 6 ranking because overlap suppression is symbol-local, while bounding the cross-symbol candidate pool. The similarity formula and weights are unchanged.
-
-Profiling identified repeated scalar normalization, interpolation, and dot products as the dominant cost. The scanner now converts each candidate series once, creates zero-copy rolling-window views, and evaluates bounded batches of 4,096 windows using vectorized NumPy operations. Invalid, irregular, or extreme inputs retain the canonical scalar path. Batch/scalar component scores are verified within `0.000001`, including flat, inverted, threshold-adjacent, close-ranking, and batch-boundary cases.
-
-Local deterministic benchmarks (30-bar reference, 1,000 bars per candidate) improved from 18.120 to 1.394 seconds for 100 symbols (13.0×) and from 88.888 to 6.531 seconds for 500 symbols (13.6×). A 1,000-symbol scan completed 971,000 comparisons in 12.853 seconds. Traced peak Python memory for the 100-symbol scan was 4.2 MiB. A separate SQLite profile loaded 100,000 cached rows in 1.111 seconds versus a 1.241-second scan, making data retrieval and object materialization a remaining end-to-end bottleneck. These measurements are local observations, not CI timing guarantees. Reproduce them with `python scripts/benchmark_broad_scan.py --symbols 100 --bars 1000`; add `--legacy`, `--memory`, or `--database` for the comparison modes.
-
-## Local market database
-
-SQLite is the initial persistence adapter. By default, the backend creates `data/shapefinder.sqlite3`; override this with `DATABASE_PATH`. Database, WAL, and shared-memory files are ignored by Git.
-
-Schema changes use small, ordered application migrations recorded in `schema_migrations`, so upgrades do not require deleting the database. OHLCV values are stored as decimal strings to preserve exact provider precision. The composite primary key `(symbol, interval, timestamp_utc)` both prevents duplicates and supports chronological range queries. Successful synchronization ranges are recorded separately, including source and synchronization time.
-
-Writes use one transaction and batch upserts. A repeated or revised provider bar updates the existing row, allowing current data and corrections to replace stale values without duplicates.
-
-## Real-market validation
-
-The developer-facing validation CLI runs a bounded custom-symbol experiment through the production provider, SQLite cache, and optimized scanner. It reports component scores, exact periods, timings, and non-destructive data-quality diagnostics; optional JSON output belongs in the ignored `backend/validation-output/` directory. It never embeds or prints the API key. See [the real-market validation runbook](docs/real-market-validation.md) for secure setup, quota controls, fixed short/medium/long daily cases, the optional intraday case, and the qualitative chart-review protocol.
-
-The Phase 10 live sample covered five liquid stocks and 1-day/5-minute intervals. It is intentionally too small to support statistical calibration or descriptive score bands. High shape-component scores on smooth trends were moderated by direction and fitted-path error, no suspicious near-100 overall matches appeared, and the score formula was not changed.
-
-### Synchronization and freshness
-
-- Complete historical coverage is returned entirely from SQLite without calling the provider.
-- Missing regions are requested independently, then committed together only after all provider calls succeed.
-- Recent requests refresh only the last three interval periods. This conservatively revisits an active daily candle or latest intraday bars without re-fetching older history.
-- If the cache is complete but Twelve Data is unconfigured, cached data is still returned—even for a recent range. Missing data still returns `PROVIDER_NOT_CONFIGURED`.
-- Requests are deterministically split into chunks capped at 4,500 theoretical interval points, safely below Twelve Data's 5,000-point limit. Chunk boundaries advance by exactly one interval to avoid gaps or duplicate boundary bars.
-
-This is intentionally not a full exchange-calendar model. Non-trading gaps are represented by synchronization coverage rather than fabricated bars, and recent-edge refreshes allow incomplete candles to be corrected later.
-
-## Twelve Data configuration
-
-Copy `.env.example` to an untracked `.env` and set `TWELVE_DATA_API_KEY` for live market data. The key is read only by FastAPI and must never use a `VITE_` prefix. With no key, the application and health route still start normally; market-data requests return `503 PROVIDER_NOT_CONFIGURED`.
-
-The provider adapter:
-
-- sends intraday boundaries and requests in UTC;
-- returns intraday timestamps as timezone-aware UTC datetimes;
-- treats daily boundaries as calendar dates and uses Twelve Data's `exchange_timezone` metadata to localize daily timestamps;
-- preserves price and volume precision using decimals;
-- retries transient network and server failures once, but never retries invalid requests, authentication failures, or rate limits;
-- returns at most the data supplied by one Twelve Data response.
-
-Twelve Data documents a maximum of 5,000 points per time-series request. Data availability, freshness, exchanges, and request quotas depend on the configured account tier. Streaming and background synchronization are not used in this phase.
+The API starts at `http://localhost:8000` by default.
 
 ### Frontend
 
-In a separate terminal:
+In another terminal:
 
 ```bash
 cd frontend
-npm ci --cache .npm-cache
+npm ci
 npm run dev
 ```
 
-Open `http://localhost:5173`. Development defaults to `http://localhost:8000`. Set `VITE_API_BASE_URL` in an untracked `frontend/.env.local` when the API uses another absolute HTTP(S) origin. Production defaults to same-origin API requests; malformed or credential-bearing URLs fail clearly.
+Open `http://localhost:5173`.
 
-The workflow supports daily date inputs and timezone-aware intraday date-time inputs for `1min`, `5min`, `15min`, `30min`, `1h`, and `1day`. It validates the ticker and both ranges before requesting data, shows loading and safe failure states, and replaces the previous reference chart after a successful request. The reference chart uses the API's exact closing values without normalization or similarity processing.
+## Twelve Data setup
 
-Reference loading and similarity search are intentionally separate actions. Search controls are enabled only after a reference is loaded; changing a reference input invalidates that loaded reference and its results, while changing search settings clears only stale results. Candidate tickers are normalized, de-duplicated chips capped at 10. The ranked result cards show a one-decimal engineered score, exact period and interval, expandable component details, and aggregate scan statistics.
+Set `TWELVE_DATA_API_KEY` in the repository-root `.env` file. It is read only by the backend.
 
-The search-scope selector explains that a universe controls which stocks are considered, while the search period controls which dates are inspected. Custom mode retains ticker chips. Named-universe results display cached coverage prominently, including partial and zero-ready states.
+Never put the key in Git, frontend code, `frontend/.env*`, or any variable prefixed with `VITE_`. With no key, the application still starts and fully cached requests still work; uncached market-data requests return a safe `PROVIDER_NOT_CONFIGURED` response.
 
-Match previews request their exact symbol, start, end, and interval only after the user asks to view one or selects it for comparison. A preview failure leaves the ranked result usable. The comparison workspace labels the side-by-side charts as actual prices. Its optional overlay rebases each series to 100 solely for visual comparison; that visualization is not the backend scoring normalization, a probability, or a forecast.
+Twelve Data quotas, supported exchanges, and historical availability depend on the configured account. ShapeFinder retries transient provider/network failures once but does not retry authentication, validation, rate-limit, or malformed-response failures.
 
-## Quality checks
+## Configuration
+
+`.env.example` documents every supported variable. Important production differences are:
+
+- `APP_ENV=production`
+- `API_HOST` must be reachable by the hosting runtime.
+- `CORS_ORIGINS` must be a JSON list of exact frontend HTTP(S) origins; wildcards are rejected.
+- `DATABASE_PATH` must point to persistent storage.
+- `TWELVE_DATA_API_KEY` must be injected as a backend secret.
+- The frontend build should set `VITE_API_BASE_URL` to the public backend origin, or omit it for a same-origin reverse proxy.
+
+See [deployment readiness](docs/deployment-readiness.md) before choosing a hosting provider.
+
+## Similarity methodology
+
+Similarity Engine V1 compares normalized closing-price sequences with fixed weights:
+
+| Component | Weight | Meaning |
+| --- | ---: | --- |
+| Shape | 45% | Overall contour after normalization |
+| Direction | 30% | Agreement in up/down movement |
+| Path | 20% | Point-by-point fitted path error |
+| Amplitude | 5% | Relative size of the move |
+
+The overall result is a ShapeFinder similarity score from 0 to 100. It is not a probability, confidence estimate, or prediction. Exact formulas and numerical policies are documented in [docs/architecture.md](docs/architecture.md#similarity-engine-v1).
+
+## Stock universes
+
+Universe metadata comes from Twelve Data's stock reference endpoint and is conservatively filtered to active U.S. common stocks. ETFs, ADRs, preferred shares, warrants, rights, funds, REITs, and other instrument classes are excluded.
+
+Named-universe searches are intentionally cached-only: candidates without complete local history for the requested interval and period are skipped rather than fetched unexpectedly. Results report the known, eligible, scanned, and skipped counts so partial coverage is explicit. Custom searches may fetch missing data normally.
+
+## Data and cache behavior
+
+The default database is `backend/data/shapefinder.sqlite3` when the backend is started from `backend/`; override it with `DATABASE_PATH`. SQLite database, WAL, and shared-memory files are ignored by Git.
+
+Complete cached ranges avoid provider calls. Missing ranges are fetched in bounded chunks and written transactionally. Recent ranges refresh a small trailing edge so active candles can be corrected. Universe metadata is refreshed on demand and reused for `UNIVERSE_TTL_HOURS` (24 by default).
+
+For deployment, the database must live on a persistent volume. Losing it does not change similarity correctness once data is fetched again, but it removes cached market/universe data, can increase quota use and latency, and leaves named universes with no scan-ready histories until repopulated.
+
+## API health
+
+- `GET /api/v1/health` — process liveness; independent of provider configuration
+- `GET /api/v1/readiness` — SQLite accessibility, integrity, and migration readiness
+- `GET /api/v1/universes` — available universe summaries and freshness
+- `GET /api/v1/market-data/{symbol}` — normalized OHLCV history
+- `POST /api/v1/similarity/search` — ranked historical matches
+
+Market-data and similarity timestamps must be timezone-aware ISO 8601 values.
+
+## Testing
+
+Backend:
 
 ```bash
-cd frontend
-npm run check
-
-cd ../backend
+cd backend
 ruff check .
 ruff format --check .
 mypy src
 pytest
 ```
 
-## Security notes
+Frontend:
 
-Market-data credentials are backend-only `SecretStr` configuration and never belong in a `VITE_*` variable. `.env`, SQLite, WAL, build, validation, and stress artifacts are ignored. Public errors contain stable codes, safe messages, and a request ID—not stack traces, SQL/provider payloads, filesystem paths, or credentials. Logs record request/provider/cache/scan categories but never query strings, bodies, keys, or market payloads.
+```bash
+cd frontend
+npm ci
+npm run check
+npm audit
+```
 
-`CORS_ORIGINS` is a JSON list of explicit HTTP(S) origins. Wildcards and malformed origins fail startup; production also rejects an empty list. Expensive scans default to two concurrent requests and 60 seconds, and request bodies default to 64 KiB. These per-process controls complement the existing 5,000-symbol and 2,000,000-window limits; they are not a distributed rate limiter.
+Real-provider validation is optional and quota-conscious. See [docs/real-market-validation.md](docs/real-market-validation.md).
 
-See [release hardening](docs/release-hardening.md) for environment behavior, failure/cancellation semantics, dependency findings, and known limitations. See [the release checklist](docs/release-checklist.md) before publishing a build.
+## Security
 
-## Known limitations
+- Keep `TWELVE_DATA_API_KEY` backend-only and untracked.
+- Public API errors contain safe codes and request IDs, not provider payloads, SQL details, stack traces, paths, or credentials.
+- CORS accepts explicit origins only.
+- Request bodies, concurrent scans, scan duration, candidate count, and estimated window count are bounded.
+- `.env`, SQLite files, build output, validation output, caches, and temporary artifacts are ignored.
 
+Review [docs/release-checklist.md](docs/release-checklist.md) before publication or deployment.
+
+## Limitations
+
+- Twelve Data is the only live provider adapter currently implemented.
+- Named universes search only scan-ready local histories; there is no background hydration.
 - Intraday candidate windows may span overnight or session boundaries.
-- Named-universe scans include only locally scan-ready histories; there is no background hydration.
-- SQLite and scan admission are process-local; there are no distributed workers or user accounts.
-- Twelve Data is the only implemented live provider and its availability and quotas still apply.
-- A scan deadline returns a bounded response, but already-admitted work finishes safely in the background and retains its concurrency slot until completion.
-- Similarity is an engineered descriptive score, not a predictive probability.
+- SQLite and scan admission are process-local and are not designed for distributed multi-worker writes.
+- Provider availability and quotas still apply.
+- ShapeFinder does not include authentication, user accounts, or persistent search jobs.
+
+## Disclaimer
+
+ShapeFinder compares historical price-chart shapes. It does not predict future prices, provide investment advice, or guarantee future similarity or performance. Use it as a research tool and make financial decisions independently.
+
+## License
+
+No open-source license has been selected yet. Until a license is added, copyright remains with the repository owner and public reuse rights are not granted. License selection is a required publication decision.
+
+## GitHub metadata
+
+Recommended description: **Find historical stock charts with similar price patterns.**
+
+Suggested topics: `stocks`, `finance`, `fastapi`, `react`, `typescript`, `python`, `similarity-search`, `data-visualization`.
