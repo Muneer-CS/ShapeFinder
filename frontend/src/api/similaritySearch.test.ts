@@ -38,6 +38,12 @@ const success = {
     windows_evaluated: 50,
     windows_passing_threshold: 0,
     matches_returned: 0,
+    universe_id: 'custom',
+    universe_symbols_total: 1,
+    symbols_eligible: 1,
+    symbols_skipped: 0,
+    symbols_failed: 0,
+    universe_stale: false,
   },
 }
 

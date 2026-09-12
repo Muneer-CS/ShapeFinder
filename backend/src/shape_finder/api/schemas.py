@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from shape_finder.application.similarity_search import MAX_CANDIDATE_SYMBOLS, MAX_TOP_N
 from shape_finder.core.market_data import BarInterval
+from shape_finder.core.universe import UniverseKind
 
 
 class HealthResponse(BaseModel):
@@ -51,7 +52,30 @@ class ReferenceSearchRequest(BaseModel):
 class SearchScopeRequest(BaseModel):
     start: datetime
     end: datetime
-    symbols: list[str] = Field(min_length=1, max_length=MAX_CANDIDATE_SYMBOLS)
+    symbols: list[str] | None = Field(default=None, max_length=MAX_CANDIDATE_SYMBOLS)
+    universe: "UniverseSelectionRequest | None" = None
+
+    @field_validator("symbols")
+    @classmethod
+    def normalize_symbols(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
+        return list(dict.fromkeys(value.strip().upper() for value in values))
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "SearchScopeRequest":
+        if self.start.tzinfo is None or self.end.tzinfo is None or self.start >= self.end:
+            raise ValueError("Search timestamps must be timezone-aware and ordered.")
+        if self.symbols and self.universe:
+            raise ValueError("Choose either symbols or a universe, not both.")
+        if not self.symbols and self.universe is None:
+            raise ValueError("Candidate symbols or a universe are required.")
+        return self
+
+
+class UniverseSelectionRequest(BaseModel):
+    kind: UniverseKind
+    symbols: list[str] = Field(default_factory=list, max_length=MAX_CANDIDATE_SYMBOLS)
 
     @field_validator("symbols")
     @classmethod
@@ -59,11 +83,11 @@ class SearchScopeRequest(BaseModel):
         return list(dict.fromkeys(value.strip().upper() for value in values))
 
     @model_validator(mode="after")
-    def validate_range(self) -> "SearchScopeRequest":
-        if self.start.tzinfo is None or self.end.tzinfo is None or self.start >= self.end:
-            raise ValueError("Search timestamps must be timezone-aware and ordered.")
-        if not self.symbols:
-            raise ValueError("At least one candidate symbol is required.")
+    def validate_custom(self) -> "UniverseSelectionRequest":
+        if self.kind is UniverseKind.CUSTOM and not self.symbols:
+            raise ValueError("A custom universe requires symbols.")
+        if self.kind is not UniverseKind.CUSTOM and self.symbols:
+            raise ValueError("Named universes do not accept explicit symbols.")
         return self
 
 
@@ -105,6 +129,12 @@ class ScanStatisticsResponse(BaseModel):
     windows_evaluated: int
     windows_passing_threshold: int
     matches_returned: int
+    universe_id: str
+    universe_symbols_total: int
+    symbols_eligible: int
+    symbols_skipped: int
+    symbols_failed: int
+    universe_stale: bool
 
 
 class SimilaritySearchResponse(BaseModel):
@@ -113,6 +143,18 @@ class SimilaritySearchResponse(BaseModel):
     search_end: datetime
     matches: list[SimilarityMatchResponse]
     statistics: ScanStatisticsResponse
+
+
+class UniverseResponse(BaseModel):
+    id: str
+    name: str
+    total_symbols: int
+    refreshed_at: datetime | None
+    stale: bool
+
+
+class UniverseListResponse(BaseModel):
+    universes: list[UniverseResponse]
 
 
 class ErrorDetail(BaseModel):

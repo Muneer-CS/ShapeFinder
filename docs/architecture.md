@@ -27,6 +27,28 @@ Candidate symbols are normalized to uppercase, trimmed, de-duplicated, and cappe
 
 Result charts are deliberately lazy. A preview or selection calls the existing market-data endpoint with that match's exact symbol, start, end, and interval. Failures are local to that preview and never remove the match. The optional comparison overlay linearly aligns the returned observations by relative position and rebases each series to 100 for display only. It does not reproduce or alter Similarity Engine V1 scoring.
 
+## Stock universe layer
+
+`UniverseProvider` returns normalized `SymbolMetadata`; `UniverseRepository` persists catalog snapshots and answers scan-readiness queries; `UniverseService` owns normalization, filtering, TTL, stale-cache fallback, and named-universe resolution. The Twelve Data adapter is the only layer that knows the official `/stocks` payload. FastAPI routes and React use stable universe IDs rather than provider fields.
+
+```text
+Twelve Data /stocks → TwelveDataProvider → UniverseService → UniverseRepository
+                                               │                 └── SQLite snapshot
+                                               └── named symbols
+                                                      ↓
+request → SimilaritySearchService → batched readiness query → cached TimeSeries
+                                                      ↓
+                                      HistoricalSimilarityScanner
+```
+
+The initial named universes are `us_equities`, `nasdaq`, and `nyse`; `custom` preserves the Phase 7 symbol-list contract. Membership is limited to active U.S. `Common Stock` records. Exact exchange equality defines NASDAQ and NYSE subsets. Index membership such as S&P 500 is deferred until an authoritative maintainable source is available.
+
+Migration 2 adds normalized `universe_symbols` and `universe_refresh` tables. A refresh is a single transaction that replaces the last successful snapshot; failed refreshes cannot partially change membership. The default 24-hour TTL is configurable. Fresh cache avoids a provider call. Stale cache is served with `universe_stale=true` when provider refresh fails.
+
+Broad search is cached-only. Readiness performs batched SQL queries over `market_data_coverage` and grouped bar counts, requiring complete range coverage, exact interval, and at least the reference bar count. It then loads only eligible series. Missing symbols are counted as skipped, not fetched or failed, and the response never presents partial coverage as full. Phase 8 has no hydration mode; this avoids accidental quota consumption.
+
+The request guard rejects more than 5,000 resolved symbols or an estimate above 2,000,000 windows. Scanner scoring remains single-process and deterministic. To reduce memory without changing ranking, each symbol is independently sorted, overlap-suppressed, and trimmed to `top_n` before global sorting. Since overlap suppression never crosses symbols, no possible global top-N result is discarded. CPU scoring remains the main measured bottleneck at roughly 5.4k comparisons/second; distributed work and background queues remain out of scope.
+
 ## Backend packages
 
 - `core`: provider-neutral domain models and protocols for OHLCV market data, similarity analysis, and persistence.
@@ -123,4 +145,4 @@ Twelve Data-specific error bodies are translated to stable internal exceptions. 
 
 ## Phase boundary
 
-Phase 7 adds the user-facing workflow for the existing on-demand scanner, including ranked results, lazy previews, selection, and comparison. Full-market discovery/scanning, result persistence, prediction, background jobs, deployment, and authentication remain out of scope.
+Phase 8 adds provider-derived U.S. stock universes, cached metadata, efficient readiness checks, truthful broad-scan coverage, safety limits, and the search-scope UI. Automatic or background hydration, authoritative index membership, result persistence, prediction, distributed workers, deployment, and authentication remain out of scope.

@@ -32,6 +32,15 @@ class MarketDataRepository(Protocol):
         source: str,
     ) -> None: ...
 
+    async def get_scan_ready_symbols(
+        self,
+        symbols: Sequence[str],
+        interval: BarInterval,
+        start: datetime,
+        end: datetime,
+        minimum_bars: int,
+    ) -> Sequence[str]: ...
+
 
 @dataclass(frozen=True, slots=True)
 class SimilarityResult:

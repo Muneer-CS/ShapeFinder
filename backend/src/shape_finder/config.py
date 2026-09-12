@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     twelve_data_api_key: SecretStr | None = None
     twelve_data_base_url: str = "https://api.twelvedata.com"
     market_data_timeout_seconds: float = 10.0
+    universe_ttl_hours: int = 24
     database_path: Path = Path("data/shapefinder.sqlite3")
 
 

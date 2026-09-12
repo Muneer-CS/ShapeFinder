@@ -2,9 +2,9 @@
 
 ShapeFinder is the foundation for a stock-chart similarity application. The future product will compare normalized chart behaviour across securities and historical periods; it is not a forecasting or trading-recommendation tool.
 
-## Current scope: Phase 7
+## Current scope: Phase 8
 
-ShapeFinder now provides an end-to-end similarity-search interface over the Phase 6 scanner. A user can load a reference chart, configure a separate historical search, manage up to 10 explicit candidate tickers, and inspect ranked matches with component scores and scan statistics. Match charts load only when requested, and a selected match can be compared with the reference using actual-price charts or an optional display-only overlay rebased to 100. ShapeFinder still does **not** discover or scan the full market, predict prices, or make recommendations.
+ShapeFinder now supports provider-independent stock universes in addition to the existing custom list of up to 10 tickers. Users can select U.S. common stocks, NASDAQ common stocks, NYSE common stocks, or Custom. Broad searches are deliberately cached-only: ShapeFinder scans the members with complete local history and reports total, eligible, scanned, and skipped counts rather than implying full coverage. Match charts remain lazy and comparison behavior is unchanged. ShapeFinder still does **not** hydrate an entire market, predict prices, or make recommendations.
 
 ## Architecture
 
@@ -53,10 +53,23 @@ The API is available at `http://localhost:8000`.
 - `GET /api/v1/health` — configuration-independent service health
 - `GET /api/v1/market-data/{symbol}?start=...&end=...&interval=...` — normalized OHLCV history
 - `POST /api/v1/similarity/search` — ranked historical matches for up to 10 explicit candidate symbols
+- `GET /api/v1/universes` — available provider-derived universe summaries and freshness
 
 The market-data endpoint requires timezone-aware ISO 8601 `start` and `end` values. Supported intervals are `1min`, `5min`, `15min`, `30min`, `1h`, and `1day`.
 
-The similarity endpoint accepts a `reference` object (`symbol`, `start`, `end`, `interval`), a `search` object (`start`, `end`, `symbols`), `top_n` from 1–100, and an optional `minimum_similarity` from 0–100. It returns the loaded reference summary, enforced search range, ranked matches with score components, and scan statistics. All timestamps must include a timezone.
+The similarity endpoint remains backward-compatible with a `search.symbols` custom list. Broad mode instead sends `search.universe.kind` as `us_equities`, `nasdaq`, or `nyse`. It returns the loaded reference summary, enforced search range, ranked matches with score components, and truthful coverage statistics. All timestamps must include a timezone.
+
+## Stock universes and broad scans
+
+Universe metadata comes from Twelve Data's official [`/stocks` reference-data endpoint](https://support.twelvedata.com/en/articles/5620513-how-to-find-all-available-symbols-at-twelve-data). The adapter requests U.S. common stocks and the application independently applies a conservative policy: country must be U.S., type must be exactly `Common Stock`, and the record must be active when active status is supplied. ETFs, ADRs/depositary receipts, preferred shares, warrants, rights, funds, REITs, and other instrument classes are excluded. Duplicate tickers are collapsed deterministically, preferring NASDAQ and then NYSE metadata.
+
+The normalized catalog is replaced transactionally in SQLite after a successful refresh and reused for 24 hours by default (`UNIVERSE_TTL_HOURS`). A successful refresh removes symbols absent from the new snapshot. If refresh fails, an existing stale snapshot remains usable and the API/UI marks it stale; with neither a cache nor provider access, universe metadata returns a safe provider error. S&P 500 membership is deferred because Twelve Data's supported-stock list does not provide authoritative index membership, and Phase 8 does not scrape or embed an unmaintainable list.
+
+A broad candidate is scan-ready only when synchronization coverage spans the requested search range for the exact interval and at least as many cached bars exist as in the loaded reference. Readiness uses batched coverage/count queries rather than loading every bar. Broad searches never fetch missing candidate histories in Phase 8; only the reference may use the normal cache-aware provider path. This cached-only default consumes no surprise quota. Bounded hydration is intentionally deferred until quota budgeting and an explicit UX can be designed together.
+
+Requests are limited to 5,000 resolved universe symbols and an estimated 2,000,000 windows. Each symbol's passing windows are overlap-suppressed and reduced to at most `top_n` finalists before global ranking. This is equivalent to Phase 6 ranking because overlap suppression is symbol-local, while bounding the cross-symbol candidate pool. The similarity formula and weights are unchanged.
+
+Local deterministic benchmarks (Python 3.12 on the development machine, 30-bar reference, 1,000 bars per candidate) measured 97,100 windows across 100 symbols in 18.120 seconds (5,359 comparisons/second), and 485,500 windows across 500 symbols in 88.888 seconds (5,462 comparisons/second). These are observations, not CI timing guarantees.
 
 ## Local market database
 
@@ -106,6 +119,8 @@ Open `http://localhost:5173`. Set `VITE_API_BASE_URL` in an untracked `.env` if 
 The workflow supports daily date inputs and timezone-aware intraday date-time inputs for `1min`, `5min`, `15min`, `30min`, `1h`, and `1day`. It validates the ticker and both ranges before requesting data, shows loading and safe failure states, and replaces the previous reference chart after a successful request. The reference chart uses the API's exact closing values without normalization or similarity processing.
 
 Reference loading and similarity search are intentionally separate actions. Search controls are enabled only after a reference is loaded; changing a reference input invalidates that loaded reference and its results, while changing search settings clears only stale results. Candidate tickers are normalized, de-duplicated chips capped at 10. The ranked result cards show a one-decimal engineered score, exact period and interval, expandable component details, and aggregate scan statistics.
+
+The search-scope selector explains that a universe controls which stocks are considered, while the search period controls which dates are inspected. Custom mode retains ticker chips. Named-universe results display cached coverage prominently, including partial and zero-ready states.
 
 Match previews request their exact symbol, start, end, and interval only after the user asks to view one or selects it for comparison. A preview failure leaves the ranked result usable. The comparison workspace labels the side-by-side charts as actual prices. Its optional overlay rebases each series to 100 solely for visual comparison; that visualization is not the backend scoring normalization, a probability, or a forecast.
 

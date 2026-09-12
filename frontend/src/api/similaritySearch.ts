@@ -10,8 +10,13 @@ export type SimilaritySearchRequest = {
   search: {
     start: string
     end: string
-    symbols: string[]
-  }
+  } & (
+    | { symbols: string[]; universe?: never }
+    | {
+        symbols?: never
+        universe: { kind: 'us_equities' | 'nasdaq' | 'nyse' }
+      }
+  )
   top_n: number
   minimum_similarity: number | null
 }
@@ -50,6 +55,12 @@ export type SimilaritySearchResponse = {
     windows_evaluated: number
     windows_passing_threshold: number
     matches_returned: number
+    universe_id: string
+    universe_symbols_total: number
+    symbols_eligible: number
+    symbols_skipped: number
+    symbols_failed: number
+    universe_stale: boolean
   }
 }
 
@@ -105,7 +116,13 @@ function isSimilaritySearchResponse(
     isNumber(statistics.symbols_scanned) &&
     isNumber(statistics.windows_evaluated) &&
     isNumber(statistics.windows_passing_threshold) &&
-    isNumber(statistics.matches_returned)
+    isNumber(statistics.matches_returned) &&
+    typeof statistics.universe_id === 'string' &&
+    isNumber(statistics.universe_symbols_total) &&
+    isNumber(statistics.symbols_eligible) &&
+    isNumber(statistics.symbols_skipped) &&
+    isNumber(statistics.symbols_failed) &&
+    typeof statistics.universe_stale === 'boolean'
   )
 }
 

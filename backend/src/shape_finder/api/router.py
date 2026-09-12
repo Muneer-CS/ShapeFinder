@@ -7,6 +7,7 @@ from shape_finder import __version__
 from shape_finder.api.dependencies import (
     get_market_data_service,
     get_similarity_search_service,
+    get_universe_service,
 )
 from shape_finder.api.schemas import (
     HealthResponse,
@@ -18,11 +19,15 @@ from shape_finder.api.schemas import (
     SimilaritySearchRequest,
     SimilaritySearchResponse,
     TimeSeriesResponse,
+    UniverseListResponse,
+    UniverseResponse,
 )
 from shape_finder.application.market_data_service import MarketDataService
 from shape_finder.application.similarity_search import SimilaritySearchService
+from shape_finder.application.universe import UniverseService
 from shape_finder.core.market_data import BarInterval
 from shape_finder.core.similarity_search import SimilaritySearchQuery
+from shape_finder.core.universe import UniverseSelection
 
 api_router = APIRouter()
 
@@ -30,6 +35,25 @@ api_router = APIRouter()
 @api_router.get("/health", response_model=HealthResponse, tags=["system"])
 def health() -> HealthResponse:
     return HealthResponse(status="ok", service="shape-finder-api", version=__version__)
+
+
+@api_router.get("/universes", response_model=UniverseListResponse, tags=["universes"])
+async def universes(
+    service: Annotated[UniverseService, Depends(get_universe_service)],
+) -> UniverseListResponse:
+    items = await service.list_universes()
+    return UniverseListResponse(
+        universes=[
+            UniverseResponse(
+                id=item.id.value,
+                name=item.name,
+                total_symbols=item.total_symbols,
+                refreshed_at=item.refreshed_at,
+                stale=item.stale,
+            )
+            for item in items
+        ]
+    )
 
 
 @api_router.get(
@@ -70,7 +94,18 @@ async def similarity_search(
             interval=request.reference.interval,
             search_start=request.search.start,
             search_end=request.search.end,
-            candidate_symbols=tuple(request.search.symbols),
+            candidate_symbols=tuple(
+                request.search.symbols
+                or (request.search.universe.symbols if request.search.universe else ())
+            ),
+            universe=(
+                UniverseSelection(
+                    kind=request.search.universe.kind,
+                    symbols=tuple(request.search.universe.symbols),
+                )
+                if request.search.universe
+                else None
+            ),
             top_n=request.top_n,
             minimum_similarity=request.minimum_similarity,
         )

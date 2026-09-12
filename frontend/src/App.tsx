@@ -29,6 +29,11 @@ import {
   type SimilarityMatch,
   type SimilaritySearchResponse,
 } from './api/similaritySearch'
+import {
+  getUniverses,
+  type UniverseInfo,
+  type UniverseKind,
+} from './api/universes'
 
 type ReferenceQuery = {
   symbol: string
@@ -119,6 +124,11 @@ function App() {
 
   const [searchStart, setSearchStart] = useState(defaults.searchStart)
   const [searchEnd, setSearchEnd] = useState(defaults.searchEnd)
+  const [searchScope, setSearchScope] = useState<'custom' | UniverseKind>(
+    'custom',
+  )
+  const [universes, setUniverses] = useState<UniverseInfo[]>([])
+  const [universeError, setUniverseError] = useState('')
   const [candidateSymbols, setCandidateSymbols] = useState([
     'AMD',
     'AAPL',
@@ -145,6 +155,17 @@ function App() {
       .catch((error: unknown) => {
         if (!(error instanceof Error && error.name === 'AbortError'))
           setConnection('offline')
+      })
+    getUniverses(controller.signal)
+      .then((items) => {
+        setUniverses(items)
+        setUniverseError('')
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof Error && error.name === 'AbortError'))
+          setUniverseError(
+            'Universe metadata is unavailable. Custom-symbol search still works.',
+          )
       })
     return () => controller.abort()
   }, [])
@@ -290,7 +311,7 @@ function App() {
       new Date(searchStart) >= new Date(searchEnd)
     )
       return setSearchError('Search start must be earlier than search end.')
-    if (!candidateSymbols.length)
+    if (searchScope === 'custom' && !candidateSymbols.length)
       return setSearchError('Add at least one stock to search.')
     const minimum = minimumSimilarity === '' ? null : Number(minimumSimilarity)
     if (
@@ -306,6 +327,18 @@ function App() {
     setPreviews({})
     setSearch({ kind: 'loading' })
     try {
+      const searchRequest =
+        searchScope === 'custom'
+          ? {
+              start: searchBoundary(searchStart),
+              end: searchBoundary(searchEnd, true),
+              symbols: candidateSymbols,
+            }
+          : {
+              start: searchBoundary(searchStart),
+              end: searchBoundary(searchEnd, true),
+              universe: { kind: searchScope },
+            }
       const data = await searchSimilarity(
         {
           reference: {
@@ -314,11 +347,7 @@ function App() {
             end: boundary(reference.query.end, reference.query.interval, true),
             interval: reference.query.interval,
           },
-          search: {
-            start: searchBoundary(searchStart),
-            end: searchBoundary(searchEnd, true),
-            symbols: candidateSymbols,
-          },
+          search: searchRequest,
           top_n: topN,
           minimum_similarity: minimum,
         },
@@ -529,54 +558,102 @@ function App() {
               Only show engineered similarity scores at or above this value.
             </small>
           </div>
-          <div className="candidate-field">
-            <label htmlFor="candidate-input">Stocks to search</label>
-            <div className="ticker-entry">
-              <div className="ticker-chips" aria-label="Candidate stocks">
-                {candidateSymbols.map((ticker) => (
-                  <span className="ticker-chip" key={ticker}>
-                    {ticker}
-                    <button
-                      type="button"
-                      onClick={() => removeCandidate(ticker)}
-                      aria-label={`Remove ${ticker}`}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-                <input
-                  id="candidate-input"
-                  value={candidateInput}
-                  onChange={(event) => setCandidateInput(event.target.value)}
-                  onKeyDown={handleCandidateKey}
-                  onBlur={() => addCandidates()}
+          <fieldset className="scope-field">
+            <legend>Search stocks</legend>
+            <p>
+              Choose which stocks to consider. The dates above control when
+              their charts are searched.
+            </p>
+            <div className="scope-options">
+              {[
+                ...universes.map((item) => ({
+                  id: item.id,
+                  label: item.name,
+                  metadata: item,
+                })),
+                { id: 'custom' as const, label: 'Custom', metadata: null },
+              ].map((option) => {
+                const metadata = option.metadata
+                return (
+                  <label key={option.id}>
+                    <input
+                      type="radio"
+                      name="search-scope"
+                      value={option.id}
+                      checked={searchScope === option.id}
+                      onChange={() =>
+                        updateSearch(() =>
+                          setSearchScope(option.id as 'custom' | UniverseKind),
+                        )
+                      }
+                    />
+                    <span>{option.label}</span>
+                    {metadata && (
+                      <small>
+                        {metadata.total_symbols.toLocaleString()} known
+                        {metadata.stale ? ' · cached metadata' : ''}
+                      </small>
+                    )}
+                  </label>
+                )
+              })}
+            </div>
+            {universeError && (
+              <p className="universe-note" role="status">
+                {universeError}
+              </p>
+            )}
+          </fieldset>
+          {searchScope === 'custom' && (
+            <div className="candidate-field">
+              <label htmlFor="candidate-input">Stocks to search</label>
+              <div className="ticker-entry">
+                <div className="ticker-chips" aria-label="Candidate stocks">
+                  {candidateSymbols.map((ticker) => (
+                    <span className="ticker-chip" key={ticker}>
+                      {ticker}
+                      <button
+                        type="button"
+                        onClick={() => removeCandidate(ticker)}
+                        aria-label={`Remove ${ticker}`}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    id="candidate-input"
+                    value={candidateInput}
+                    onChange={(event) => setCandidateInput(event.target.value)}
+                    onKeyDown={handleCandidateKey}
+                    onBlur={() => addCandidates()}
+                    disabled={candidateSymbols.length === 10}
+                    placeholder={
+                      candidateSymbols.length === 10
+                        ? 'Limit reached'
+                        : 'Add ticker'
+                    }
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+                <button
+                  className="add-ticker"
+                  type="button"
+                  onClick={() => addCandidates()}
                   disabled={candidateSymbols.length === 10}
-                  placeholder={
-                    candidateSymbols.length === 10
-                      ? 'Limit reached'
-                      : 'Add ticker'
-                  }
-                  autoComplete="off"
-                  spellCheck={false}
-                />
+                >
+                  Add
+                </button>
               </div>
-              <button
-                className="add-ticker"
-                type="button"
-                onClick={() => addCandidates()}
-                disabled={candidateSymbols.length === 10}
-              >
-                Add
-              </button>
+              <div className="candidate-meta">
+                <span>{candidateSymbols.length} of 10 stocks</span>
+                {candidateMessage && (
+                  <span role="status">{candidateMessage}</span>
+                )}
+              </div>
             </div>
-            <div className="candidate-meta">
-              <span>{candidateSymbols.length} of 10 stocks</span>
-              {candidateMessage && (
-                <span role="status">{candidateMessage}</span>
-              )}
-            </div>
-          </div>
+          )}
           <div className="card-action search-action">
             {searchError && (
               <p className="form-error" role="alert">
@@ -614,7 +691,7 @@ function App() {
       )}
 
       <footer>
-        <span>Phase 7</span>
+        <span>Phase 8</span>
         <span>Engineered chart-shape similarity · No predictions</span>
       </footer>
     </main>
@@ -706,10 +783,32 @@ function SearchResults({
               historical windows compared
             </p>
           </div>
+          {state.data.statistics.universe_id !== 'custom' && (
+            <div className="coverage-banner" role="status">
+              <strong>
+                Scanned {state.data.statistics.symbols_scanned.toLocaleString()}{' '}
+                of{' '}
+                {state.data.statistics.universe_symbols_total.toLocaleString()}{' '}
+                known stocks.
+              </strong>{' '}
+              {state.data.statistics.symbols_skipped.toLocaleString()} lacked
+              complete cached history for this interval and period.
+              {state.data.statistics.universe_stale &&
+                ' Universe membership came from a stale local cache.'}
+            </div>
+          )}
           {state.data.matches.length === 0 ? (
             <div className="zero-results" role="status">
-              <h3>No matching periods found</h3>
-              <p>No matches met your selected similarity threshold.</p>
+              <h3>
+                {state.data.statistics.symbols_eligible === 0
+                  ? 'No scan-ready stocks'
+                  : 'No matching periods found'}
+              </h3>
+              <p>
+                {state.data.statistics.symbols_eligible === 0
+                  ? 'No stocks in this universe have complete cached history for the selected interval and period.'
+                  : 'No matches met your selected similarity threshold.'}
+              </p>
             </div>
           ) : (
             <ol className="matches-list">

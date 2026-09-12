@@ -73,6 +73,12 @@ const searchSuccess = (items = matches) => ({
     windows_evaluated: 2340,
     windows_passing_threshold: items.length,
     matches_returned: items.length,
+    universe_id: 'custom',
+    universe_symbols_total: 3,
+    symbols_eligible: 3,
+    symbols_skipped: 0,
+    symbols_failed: 0,
+    universe_stale: false,
   },
 })
 
@@ -84,12 +90,46 @@ function mockApi(
   options: {
     search?: ReturnType<typeof response>
     previewFails?: boolean
+    universeFails?: boolean
   } = {},
 ) {
   const fetchMock = vi.fn((input: string | URL | Request) => {
     const url = String(input)
     if (url.includes('/health'))
       return Promise.resolve(response({ status: 'ok' }))
+    if (url.endsWith('/api/v1/universes'))
+      if (options.universeFails)
+        return Promise.resolve(
+          response({ error: { code: 'PROVIDER_NOT_CONFIGURED' } }, false, 503),
+        )
+      else
+        return Promise.resolve(
+          response({
+            universes: [
+              {
+                id: 'us_equities',
+                name: 'U.S. stocks',
+                total_symbols: 3921,
+                refreshed_at: '2026-09-11T00:00:00Z',
+                stale: false,
+              },
+              {
+                id: 'nasdaq',
+                name: 'NASDAQ common stocks',
+                total_symbols: 1800,
+                refreshed_at: '2026-09-11T00:00:00Z',
+                stale: false,
+              },
+              {
+                id: 'nyse',
+                name: 'NYSE common stocks',
+                total_symbols: 1400,
+                refreshed_at: '2026-09-11T00:00:00Z',
+                stale: false,
+              },
+            ],
+          }),
+        )
     if (url.includes('/similarity/search'))
       return Promise.resolve(options.search ?? response(searchSuccess()))
     const ticker = url.match(/market-data\/([^?]+)/)?.[1] ?? 'NVDA'
@@ -268,6 +308,93 @@ describe('candidate symbol controls', () => {
 })
 
 describe('similarity search workflow', () => {
+  it('renders provider-backed universe choices and keeps chips in Custom mode', async () => {
+    mockApi()
+    render(<App />)
+    expect(
+      await screen.findByRole('radio', { name: /U\.S\. stocks/ }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /NASDAQ/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('Stocks to search')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: /NASDAQ/ }))
+    expect(screen.queryByLabelText('Stocks to search')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: /Custom/ }))
+    expect(screen.getByLabelText('Stocks to search')).toBeInTheDocument()
+  })
+
+  it('posts a named universe without custom symbols', async () => {
+    const fetchMock = mockApi()
+    render(<App />)
+    await loadReference()
+    fireEvent.click(screen.getByRole('radio', { name: /NASDAQ/ }))
+    await runSearch()
+    const calls = fetchMock.mock.calls as unknown as Array<
+      [RequestInfo | URL, RequestInit?]
+    >
+    const call = calls.find(([url]) =>
+      String(url).includes('/similarity/search'),
+    )
+    const body = JSON.parse(String(call?.[1]?.body)) as {
+      search: Record<string, unknown>
+    }
+    expect(body.search).toMatchObject({ universe: { kind: 'nasdaq' } })
+    expect(body.search).not.toHaveProperty('symbols')
+  })
+
+  it('makes partial broad-scan coverage prominent and handles zero eligibility', async () => {
+    const partial = searchSuccess([])
+    partial.statistics = {
+      ...partial.statistics,
+      universe_id: 'us_equities',
+      universe_symbols_total: 3921,
+      symbols_requested: 3921,
+      symbols_eligible: 812,
+      symbols_scanned: 812,
+      symbols_skipped: 3109,
+    }
+    mockApi({ search: response(partial) })
+    render(<App />)
+    await loadReference()
+    fireEvent.click(screen.getByRole('radio', { name: /U\.S\. stocks/ }))
+    await runSearch()
+    expect(
+      screen.getByText(/Scanned 812 of 3,921 known stocks/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/3,109 lacked complete cached history/),
+    ).toBeInTheDocument()
+  })
+
+  it('shows a clear state when a universe has no scan-ready stocks', async () => {
+    const empty = searchSuccess([])
+    empty.statistics = {
+      ...empty.statistics,
+      universe_id: 'nyse',
+      universe_symbols_total: 1400,
+      symbols_requested: 1400,
+      symbols_eligible: 0,
+      symbols_scanned: 0,
+      symbols_skipped: 1400,
+    }
+    mockApi({ search: response(empty) })
+    render(<App />)
+    await loadReference()
+    fireEvent.click(screen.getByRole('radio', { name: /NYSE/ }))
+    await runSearch()
+    expect(
+      screen.getByRole('heading', { name: 'No scan-ready stocks' }),
+    ).toBeInTheDocument()
+    expect(screen.getAllByText(/complete cached history/)).toHaveLength(2)
+  })
+
+  it('explains universe metadata failure while preserving custom search', async () => {
+    mockApi({ universeFails: true })
+    render(<App />)
+    expect(
+      await screen.findByText(/Universe metadata is unavailable/),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Stocks to search')).toBeInTheDocument()
+  })
   it('validates search range, empty candidates, and minimum score', async () => {
     mockApi()
     render(<App />)

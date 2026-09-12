@@ -41,4 +41,33 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=2,
+        statements=(
+            """
+            CREATE TABLE universe_symbols (
+                symbol TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                exchange TEXT NOT NULL,
+                country TEXT NOT NULL,
+                security_type TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                active INTEGER NOT NULL CHECK (active IN (0, 1)),
+                source TEXT NOT NULL,
+                refreshed_at_utc TEXT NOT NULL
+            ) WITHOUT ROWID
+            """,
+            """
+            CREATE INDEX universe_symbols_exchange_idx
+            ON universe_symbols(exchange, active, security_type, country)
+            """,
+            """
+            CREATE TABLE universe_refresh (
+                source TEXT PRIMARY KEY,
+                refreshed_at_utc TEXT NOT NULL,
+                symbol_count INTEGER NOT NULL CHECK (symbol_count >= 0)
+            ) WITHOUT ROWID
+            """,
+        ),
+    ),
 )

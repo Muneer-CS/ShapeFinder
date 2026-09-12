@@ -18,6 +18,7 @@ from shape_finder.core.errors import (
     UnsupportedIntervalError,
 )
 from shape_finder.core.market_data import BarInterval, PriceBar, TimeSeries
+from shape_finder.core.universe import SymbolMetadata
 
 INTERVAL_MAP: Mapping[BarInterval, str] = {
     BarInterval.ONE_MINUTE: "1min",
@@ -63,6 +64,20 @@ class TwelveDataProvider:
         payload = await self._request(params)
         return self._parse_time_series(payload, interval)
 
+    async def list_stocks(self) -> tuple[SymbolMetadata, ...]:
+        """Return normalized stock records from Twelve Data's official /stocks list."""
+        if not self._api_key:
+            raise MissingApiKeyError("Twelve Data is not configured.")
+        payload = await self._request_endpoint(
+            "/stocks",
+            {
+                "country": "United States",
+                "type": "Common Stock",
+                "apikey": self._api_key,
+            },
+        )
+        return self._parse_stocks(payload)
+
     def _build_query(
         self,
         symbol: str,
@@ -92,9 +107,12 @@ class TwelveDataProvider:
         }
 
     async def _request(self, params: dict[str, str]) -> Any:
+        return await self._request_endpoint("/time_series", params)
+
+    async def _request_endpoint(self, endpoint: str, params: dict[str, str]) -> Any:
         for attempt in range(self._retry_attempts):
             try:
-                response = await self._client.get("/time_series", params=params)
+                response = await self._client.get(endpoint, params=params)
             except httpx.RequestError as error:
                 if attempt + 1 == self._retry_attempts:
                     raise ProviderNetworkError("Market-data provider is unreachable.") from error
@@ -116,6 +134,46 @@ class TwelveDataProvider:
             return payload
 
         raise ProviderNetworkError("Market-data provider request failed.")
+
+    @staticmethod
+    def _parse_stocks(payload: Any) -> tuple[SymbolMetadata, ...]:
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            raise MalformedProviderResponseError(
+                "Provider stock catalog is missing its data array."
+            )
+        records: list[SymbolMetadata] = []
+        try:
+            for item in payload["data"]:
+                if not isinstance(item, dict):
+                    raise TypeError
+                required = ("symbol", "name", "exchange", "country", "type", "currency")
+                values = [item[field] for field in required]
+                if not all(isinstance(value, str) and value.strip() for value in values):
+                    raise TypeError
+                raw_active = item.get("active", True)
+                if not isinstance(raw_active, (bool, str, int)):
+                    raise TypeError
+                active = raw_active is True or str(raw_active).strip().lower() in {
+                    "1",
+                    "true",
+                    "active",
+                }
+                records.append(
+                    SymbolMetadata(
+                        symbol=str(item["symbol"]).strip().upper(),
+                        name=str(item["name"]).strip(),
+                        exchange=str(item["exchange"]).strip().upper(),
+                        country=str(item["country"]).strip(),
+                        security_type=str(item["type"]).strip(),
+                        currency=str(item["currency"]).strip().upper(),
+                        active=active,
+                    )
+                )
+        except (KeyError, TypeError) as error:
+            raise MalformedProviderResponseError(
+                "Provider returned malformed stock metadata."
+            ) from error
+        return tuple(records)
 
     @staticmethod
     def _raise_for_provider_error(status_code: int, payload: Any) -> None:

@@ -1,5 +1,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
+from typing import cast
 
 import httpx
 from fastapi import FastAPI
@@ -14,9 +16,11 @@ from shape_finder.application.similarity_search import (
     HistoricalSimilarityScanner,
     SimilaritySearchService,
 )
+from shape_finder.application.universe import UniverseService
 from shape_finder.config import get_settings
 from shape_finder.core.market_data import MarketDataProvider
 from shape_finder.core.persistence import MarketDataRepository
+from shape_finder.core.universe import UniverseProvider, UniverseRepository
 from shape_finder.infrastructure.market_data.twelve_data import TwelveDataProvider
 from shape_finder.infrastructure.persistence.sqlite_market_data import SQLiteMarketDataRepository
 
@@ -34,10 +38,18 @@ def create_app(
 
         def configure_services(active_provider: MarketDataProvider) -> None:
             market_data = MarketDataService(active_provider, active_repository)
+            universe_service = UniverseService(
+                cast(UniverseProvider, active_provider),
+                cast(UniverseRepository, active_repository),
+                ttl=timedelta(hours=settings.universe_ttl_hours),
+            )
             application.state.market_data_service = market_data
+            application.state.universe_service = universe_service
             application.state.similarity_search_service = SimilaritySearchService(
                 market_data,
                 HistoricalSimilarityScanner(ChartSimilarityEngine()),
+                active_repository,
+                universe_service,
             )
 
         if provider is not None:

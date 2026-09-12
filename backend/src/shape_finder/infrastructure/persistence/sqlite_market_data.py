@@ -1,7 +1,7 @@
 import asyncio
 import sqlite3
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from shape_finder.core.errors import MalformedProviderResponseError
 from shape_finder.core.market_data import BarInterval, PriceBar, TimeSeries
 from shape_finder.core.persistence import CoverageRange
+from shape_finder.core.universe import SymbolMetadata
 from shape_finder.infrastructure.persistence.migrations import MIGRATIONS
 
 
@@ -201,3 +202,185 @@ class SQLiteMarketDataRepository:
                         source,
                     ),
                 )
+
+    async def replace_universe(
+        self,
+        symbols: Sequence[SymbolMetadata],
+        *,
+        refreshed_at: datetime,
+        source: str,
+    ) -> None:
+        await asyncio.to_thread(self._replace_universe_sync, symbols, refreshed_at, source)
+
+    def _replace_universe_sync(
+        self,
+        symbols: Sequence[SymbolMetadata],
+        refreshed_at: datetime,
+        source: str,
+    ) -> None:
+        refreshed_text = _utc_text(refreshed_at)
+        with self._connect() as connection, connection:
+            connection.execute("DELETE FROM universe_symbols")
+            connection.executemany(
+                """
+                INSERT INTO universe_symbols(
+                    symbol, name, exchange, country, security_type, currency,
+                    active, source, refreshed_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        item.symbol.upper(),
+                        item.name,
+                        item.exchange.upper(),
+                        item.country,
+                        item.security_type,
+                        item.currency.upper(),
+                        int(item.active),
+                        source,
+                        refreshed_text,
+                    )
+                    for item in symbols
+                ],
+            )
+            connection.execute(
+                """
+                INSERT INTO universe_refresh(source, refreshed_at_utc, symbol_count)
+                VALUES (?, ?, ?)
+                ON CONFLICT(source) DO UPDATE SET
+                    refreshed_at_utc = excluded.refreshed_at_utc,
+                    symbol_count = excluded.symbol_count
+                """,
+                (source, refreshed_text, len(symbols)),
+            )
+
+    async def list_universe_symbols(self) -> Sequence[SymbolMetadata]:
+        return await asyncio.to_thread(self._list_universe_symbols_sync)
+
+    def _list_universe_symbols_sync(self) -> tuple[SymbolMetadata, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT symbol, name, exchange, country, security_type, currency, active
+                FROM universe_symbols
+                ORDER BY symbol ASC
+                """
+            ).fetchall()
+        return tuple(
+            SymbolMetadata(
+                symbol=str(row["symbol"]),
+                name=str(row["name"]),
+                exchange=str(row["exchange"]),
+                country=str(row["country"]),
+                security_type=str(row["security_type"]),
+                currency=str(row["currency"]),
+                active=bool(row["active"]),
+            )
+            for row in rows
+        )
+
+    async def get_universe_refreshed_at(self) -> datetime | None:
+        return await asyncio.to_thread(self._get_universe_refreshed_at_sync)
+
+    def _get_universe_refreshed_at_sync(self) -> datetime | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT MAX(refreshed_at_utc) AS refreshed_at FROM universe_refresh"
+            ).fetchone()
+        value = row["refreshed_at"] if row else None
+        return datetime.fromisoformat(str(value)) if value else None
+
+    async def get_scan_ready_symbols(
+        self,
+        symbols: Sequence[str],
+        interval: BarInterval,
+        start: datetime,
+        end: datetime,
+        minimum_bars: int,
+    ) -> Sequence[str]:
+        return await asyncio.to_thread(
+            self._get_scan_ready_symbols_sync,
+            symbols,
+            interval,
+            start,
+            end,
+            minimum_bars,
+        )
+
+    def _get_scan_ready_symbols_sync(
+        self,
+        symbols: Sequence[str],
+        interval: BarInterval,
+        start: datetime,
+        end: datetime,
+        minimum_bars: int,
+    ) -> tuple[str, ...]:
+        wanted = tuple(dict.fromkeys(symbol.upper() for symbol in symbols))
+        if not wanted:
+            return ()
+        start_text, end_text = _utc_text(start), _utc_text(end)
+        coverage: dict[str, list[tuple[str, str]]] = {symbol: [] for symbol in wanted}
+        counts: dict[str, int] = {}
+        with self._connect() as connection:
+            for offset in range(0, len(wanted), 400):
+                batch = wanted[offset : offset + 400]
+                placeholders = ",".join("?" for _ in batch)
+                coverage_rows = connection.execute(
+                    f"""
+                    SELECT symbol, start_utc, end_utc
+                    FROM market_data_coverage
+                    WHERE symbol IN ({placeholders}) AND interval = ?
+                      AND end_utc >= ? AND start_utc <= ?
+                    ORDER BY symbol, start_utc
+                    """,
+                    (*batch, interval.value, start_text, end_text),
+                ).fetchall()
+                for row in coverage_rows:
+                    coverage[str(row["symbol"])].append(
+                        (str(row["start_utc"]), str(row["end_utc"]))
+                    )
+                count_rows = connection.execute(
+                    f"""
+                    SELECT symbol, COUNT(*) AS bar_count
+                    FROM market_bars
+                    WHERE symbol IN ({placeholders}) AND interval = ?
+                      AND timestamp_utc >= ? AND timestamp_utc <= ?
+                    GROUP BY symbol
+                    """,
+                    (*batch, interval.value, start_text, end_text),
+                ).fetchall()
+                counts.update({str(row["symbol"]): int(row["bar_count"]) for row in count_rows})
+        return tuple(
+            symbol
+            for symbol in wanted
+            if counts.get(symbol, 0) >= minimum_bars
+            and _coverage_contains(coverage[symbol], start_text, end_text, interval)
+        )
+
+
+def _coverage_contains(
+    ranges: Sequence[tuple[str, str]], start: str, end: str, interval: BarInterval
+) -> bool:
+    requested_start = datetime.fromisoformat(start)
+    requested_end = datetime.fromisoformat(end)
+    cursor = requested_start
+    steps = {
+        BarInterval.ONE_MINUTE: timedelta(minutes=1),
+        BarInterval.FIVE_MINUTES: timedelta(minutes=5),
+        BarInterval.FIFTEEN_MINUTES: timedelta(minutes=15),
+        BarInterval.THIRTY_MINUTES: timedelta(minutes=30),
+        BarInterval.ONE_HOUR: timedelta(hours=1),
+        BarInterval.ONE_DAY: timedelta(days=1),
+        BarInterval.ONE_WEEK: timedelta(weeks=1),
+    }
+    for index, (range_start, range_end) in enumerate(ranges):
+        range_start_at = datetime.fromisoformat(range_start)
+        range_end_at = datetime.fromisoformat(range_end)
+        allowed_start = cursor if index == 0 else cursor + steps[interval]
+        if range_start_at > allowed_start:
+            return False
+        if range_end_at >= requested_end:
+            return True
+        if range_end_at > cursor:
+            cursor = range_end_at
+    return False

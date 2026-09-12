@@ -1,11 +1,13 @@
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from shape_finder.application.market_data_service import MarketDataService
+from shape_finder.application.universe import UniverseService
 from shape_finder.core.market_data import PriceBar, TimeSeries
+from shape_finder.core.persistence import MarketDataRepository
 from shape_finder.core.similarity import SimilarityEngine
 from shape_finder.core.similarity_search import (
     InvalidSimilaritySearchError,
@@ -15,9 +17,12 @@ from shape_finder.core.similarity_search import (
     SimilaritySearchQuery,
     SimilaritySearchResult,
 )
+from shape_finder.core.universe import UniverseKind
 
 MAX_CANDIDATE_SYMBOLS = 10
 MAX_TOP_N = 100
+MAX_UNIVERSE_SYMBOLS = 5_000
+MAX_SCAN_WINDOWS = 2_000_000
 _SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
 
 
@@ -65,7 +70,7 @@ class HistoricalSimilarityScanner:
         reference_timestamps = frozenset(bar.timestamp for bar in reference_bars)
         window_length = len(reference_bars)
         threshold = query.minimum_similarity if query.minimum_similarity is not None else 0.0
-        ranked: list[_ScoredWindow] = []
+        finalists: list[_ScoredWindow] = []
         windows_evaluated = 0
         windows_passing = 0
 
@@ -81,6 +86,7 @@ class HistoricalSimilarityScanner:
             )
             if len(bars) < window_length:
                 continue
+            candidate_ranked: list[_ScoredWindow] = []
             for offset in range(0, len(bars) - window_length + 1, self._stride):
                 window = bars[offset : offset + window_length]
                 timestamps = frozenset(bar.timestamp for bar in window)
@@ -97,7 +103,7 @@ class HistoricalSimilarityScanner:
                 if score.overall_score < threshold:
                     continue
                 windows_passing += 1
-                ranked.append(
+                candidate_ranked.append(
                     _ScoredWindow(
                         match=SimilarityMatch(
                             symbol=candidate.symbol.upper(),
@@ -110,8 +116,20 @@ class HistoricalSimilarityScanner:
                         timestamps=timestamps,
                     )
                 )
+            candidate_ranked.sort(key=_ranking_key)
+            candidate_selected: list[_ScoredWindow] = []
+            for item in candidate_ranked:
+                if any(
+                    _overlap_ratio(item.timestamps, chosen.timestamps) > self._overlap_threshold
+                    for chosen in candidate_selected
+                ):
+                    continue
+                candidate_selected.append(item)
+                if len(candidate_selected) == query.top_n:
+                    break
+            finalists.extend(candidate_selected)
 
-        ranked.sort(
+        finalists.sort(
             key=lambda item: (
                 -item.match.score.overall_score,
                 item.match.start,
@@ -119,19 +137,7 @@ class HistoricalSimilarityScanner:
                 item.match.end,
             )
         )
-        selected: list[_ScoredWindow] = []
-        for item in ranked:
-            if any(
-                chosen.match.symbol == item.match.symbol
-                and _overlap_ratio(item.timestamps, chosen.timestamps) > self._overlap_threshold
-                for chosen in selected
-            ):
-                continue
-            selected.append(item)
-            if len(selected) == query.top_n:
-                break
-
-        matches = tuple(item.match for item in selected)
+        matches = tuple(item.match for item in finalists[: query.top_n])
         return SimilaritySearchResult(
             reference=ReferenceSummary(
                 symbol=reference.symbol.upper(),
@@ -160,9 +166,13 @@ class SimilaritySearchService:
         self,
         market_data: MarketDataService,
         scanner: HistoricalSimilarityScanner,
+        repository: MarketDataRepository | None = None,
+        universe_service: UniverseService | None = None,
     ) -> None:
         self._market_data = market_data
         self._scanner = scanner
+        self._repository = repository
+        self._universe_service = universe_service
 
     async def search(self, query: SimilaritySearchQuery) -> SimilaritySearchResult:
         normalized = _normalized_query(query)
@@ -172,6 +182,8 @@ class SimilaritySearchService:
             normalized.reference_end,
             normalized.interval,
         )
+        if normalized.universe and normalized.universe.kind is not UniverseKind.CUSTOM:
+            return await self._search_universe(normalized, reference)
         candidates: list[TimeSeries] = []
         for symbol in normalized.candidate_symbols:
             candidates.append(
@@ -182,7 +194,67 @@ class SimilaritySearchService:
                     normalized.interval,
                 )
             )
-        return self._scanner.scan(reference, candidates, normalized)
+        result = self._scanner.scan(reference, candidates, normalized)
+        total = len(normalized.candidate_symbols)
+        return replace(
+            result,
+            statistics=replace(
+                result.statistics,
+                universe_id=UniverseKind.CUSTOM.value,
+                universe_symbols_total=total,
+                symbols_eligible=total,
+                symbols_skipped=0,
+            ),
+        )
+
+    async def _search_universe(
+        self, query: SimilaritySearchQuery, reference: TimeSeries
+    ) -> SimilaritySearchResult:
+        if self._repository is None or self._universe_service is None or query.universe is None:
+            raise InvalidSimilaritySearchError("Broad-universe search is not configured.")
+        symbols, _, stale = await self._universe_service.resolve(query.universe.kind)
+        if len(symbols) > MAX_UNIVERSE_SYMBOLS:
+            raise InvalidSimilaritySearchError(
+                f"The selected universe exceeds the {MAX_UNIVERSE_SYMBOLS}-symbol safety limit."
+            )
+        reference_bars = tuple(bar for bar in reference.bars if _valid_bar(bar))
+        eligible = tuple(
+            await self._repository.get_scan_ready_symbols(
+                symbols,
+                query.interval,
+                query.search_start,
+                query.search_end,
+                len(reference_bars),
+            )
+        )
+        estimated_bars = _estimated_periods(query.search_start, query.search_end, query.interval)
+        estimated_windows = len(eligible) * max(0, estimated_bars - len(reference_bars) + 1)
+        if estimated_windows > MAX_SCAN_WINDOWS:
+            raise InvalidSimilaritySearchError(
+                f"The scan could exceed the {MAX_SCAN_WINDOWS:,}-window safety limit. "
+                "Use a shorter date range or a narrower universe."
+            )
+        candidates = [
+            await self._repository.get_time_series(
+                symbol, query.interval, query.search_start, query.search_end
+            )
+            for symbol in eligible
+        ]
+        resolved_query = replace(query, candidate_symbols=symbols)
+        result = self._scanner.scan(reference, candidates, resolved_query)
+        return replace(
+            result,
+            statistics=replace(
+                result.statistics,
+                symbols_requested=len(symbols),
+                universe_id=query.universe.kind.value,
+                universe_symbols_total=len(symbols),
+                symbols_eligible=len(eligible),
+                symbols_skipped=len(symbols) - len(eligible),
+                symbols_failed=0,
+                universe_stale=stale,
+            ),
+        )
 
 
 def _normalized_query(query: SimilaritySearchQuery) -> SimilaritySearchQuery:
@@ -195,6 +267,7 @@ def _normalized_query(query: SimilaritySearchQuery) -> SimilaritySearchQuery:
         search_start=query.search_start,
         search_end=query.search_end,
         candidate_symbols=symbols,
+        universe=query.universe,
         top_n=query.top_n,
         minimum_similarity=query.minimum_similarity,
     )
@@ -211,9 +284,10 @@ def _validate_query(query: SimilaritySearchQuery) -> None:
         raise InvalidSimilaritySearchError("Reference start must be earlier than reference end.")
     if query.search_start >= query.search_end:
         raise InvalidSimilaritySearchError("Search start must be earlier than search end.")
-    if not query.candidate_symbols:
+    is_custom = query.universe is None or query.universe.kind is UniverseKind.CUSTOM
+    if is_custom and not query.candidate_symbols:
         raise InvalidSimilaritySearchError("At least one candidate symbol is required.")
-    if len(query.candidate_symbols) > MAX_CANDIDATE_SYMBOLS:
+    if is_custom and len(query.candidate_symbols) > MAX_CANDIDATE_SYMBOLS:
         raise InvalidSimilaritySearchError(
             f"At most {MAX_CANDIDATE_SYMBOLS} candidate symbols are allowed."
         )
@@ -236,3 +310,26 @@ def _valid_bar(bar: PriceBar) -> bool:
 
 def _overlap_ratio(left: frozenset[datetime], right: frozenset[datetime]) -> float:
     return len(left & right) / min(len(left), len(right))
+
+
+def _ranking_key(item: _ScoredWindow) -> tuple[float, datetime, str, datetime]:
+    return (
+        -item.match.score.overall_score,
+        item.match.start,
+        item.match.symbol,
+        item.match.end,
+    )
+
+
+def _estimated_periods(start: datetime, end: datetime, interval: object) -> int:
+    steps = {
+        "1min": timedelta(minutes=1),
+        "5min": timedelta(minutes=5),
+        "15min": timedelta(minutes=15),
+        "30min": timedelta(minutes=30),
+        "1h": timedelta(hours=1),
+        "1day": timedelta(days=1),
+        "1week": timedelta(weeks=1),
+    }
+    value = getattr(interval, "value", str(interval))
+    return int((end - start) / steps[value]) + 1

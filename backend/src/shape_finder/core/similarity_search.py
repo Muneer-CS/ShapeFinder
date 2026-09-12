@@ -3,6 +3,7 @@ from datetime import datetime
 
 from shape_finder.core.market_data import BarInterval
 from shape_finder.core.similarity import SimilarityScore
+from shape_finder.core.universe import UniverseSelection
 
 
 class InvalidSimilaritySearchError(ValueError):
@@ -17,7 +18,8 @@ class SimilaritySearchQuery:
     interval: BarInterval
     search_start: datetime
     search_end: datetime
-    candidate_symbols: tuple[str, ...]
+    candidate_symbols: tuple[str, ...] = ()
+    universe: UniverseSelection | None = None
     top_n: int = 10
     minimum_similarity: float | None = None
 
@@ -48,6 +50,12 @@ class ScanStatistics:
     windows_evaluated: int
     windows_passing_threshold: int
     matches_returned: int
+    universe_id: str = "custom"
+    universe_symbols_total: int = 0
+    symbols_eligible: int = 0
+    symbols_skipped: int = 0
+    symbols_failed: int = 0
+    universe_stale: bool = False
 
 
 @dataclass(frozen=True, slots=True)
