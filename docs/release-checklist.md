@@ -29,7 +29,7 @@ Last completed for the local 0.1.0 release candidate on 2026-09-12. Re-run deplo
 - [x] `.env`, SQLite/WAL/shared-memory files, frontend build output, validation output, and temporary test artifacts are ignored and untracked.
 - [x] `.env.example` contains only safe defaults/placeholders and documents every application variable.
 - [x] README setup, methodology, universes, cache behavior, security, limitations, disclaimer, and deployment links are current.
-- [ ] Select and add a license before or at public GitHub publication.
+- [x] The standard MIT License is present with the established public author name and no private email address.
 
 ## Deployment preparation
 

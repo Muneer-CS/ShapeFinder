@@ -184,7 +184,7 @@ ShapeFinder compares historical price-chart shapes. It does not predict future p
 
 ## License
 
-No open-source license has been selected yet. Until a license is added, copyright remains with the repository owner and public reuse rights are not granted. License selection is a required publication decision.
+ShapeFinder is available under the [MIT License](LICENSE).
 
 ## GitHub metadata
 
