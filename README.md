@@ -2,9 +2,9 @@
 
 ShapeFinder is the foundation for a stock-chart similarity application. The future product will compare normalized chart behaviour across securities and historical periods; it is not a forecasting or trading-recommendation tool.
 
-## Current scope: Phase 6
+## Current scope: Phase 7
 
-ShapeFinder now includes its first historical similarity scanner. The backend loads a reference series and up to 10 caller-supplied candidate symbols through the existing cache-aware market-data service, evaluates every comparable sliding window, suppresses overlapping duplicates, and returns globally ranked matches. The Phase 4 reference-chart workflow remains unchanged. ShapeFinder still does **not** discover or scan the full market, display similarity results in the UI, predict prices, or make recommendations.
+ShapeFinder now provides an end-to-end similarity-search interface over the Phase 6 scanner. A user can load a reference chart, configure a separate historical search, manage up to 10 explicit candidate tickers, and inspect ranked matches with component scores and scan statistics. Match charts load only when requested, and a selected match can be compared with the reference using actual-price charts or an optional display-only overlay rebased to 100. ShapeFinder still does **not** discover or scan the full market, predict prices, or make recommendations.
 
 ## Architecture
 
@@ -103,9 +103,11 @@ npm run dev
 
 Open `http://localhost:5173`. Set `VITE_API_BASE_URL` in an untracked `.env` if the API uses a different origin.
 
-The workflow supports daily date inputs and timezone-aware intraday date-time inputs for `1min`, `5min`, `15min`, `30min`, `1h`, and `1day`. It validates the ticker and both ranges before requesting data, shows loading and safe failure states, and replaces the previous reference chart after a successful request. The chart uses the API's exact closing values without normalization or similarity processing.
+The workflow supports daily date inputs and timezone-aware intraday date-time inputs for `1min`, `5min`, `15min`, `30min`, `1h`, and `1day`. It validates the ticker and both ranges before requesting data, shows loading and safe failure states, and replaces the previous reference chart after a successful request. The reference chart uses the API's exact closing values without normalization or similarity processing.
 
-The search period is deliberately session-only UI state in Phase 4. It appears beside the loaded reference so the distinction is visible, but it is not persisted and does not initiate a search.
+Reference loading and similarity search are intentionally separate actions. Search controls are enabled only after a reference is loaded; changing a reference input invalidates that loaded reference and its results, while changing search settings clears only stale results. Candidate tickers are normalized, de-duplicated chips capped at 10. The ranked result cards show a one-decimal engineered score, exact period and interval, expandable component details, and aggregate scan statistics.
+
+Match previews request their exact symbol, start, end, and interval only after the user asks to view one or selects it for comparison. A preview failure leaves the ranked result usable. The comparison workspace labels the side-by-side charts as actual prices. Its optional overlay rebases each series to 100 solely for visual comparison; that visualization is not the backend scoring normalization, a probability, or a forecast.
 
 ## Quality checks
 

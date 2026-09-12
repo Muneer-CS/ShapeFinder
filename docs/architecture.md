@@ -6,17 +6,26 @@ Dependencies point inward: API and infrastructure depend on application/core con
 
 ## Frontend flow
 
-The React form holds two distinct ranges. The reference range is converted to timezone-aware API boundaries and sent through the typed `marketData` client. The search range is validated and captured with the successful reference result, but remains local session state for future similarity work.
+The React application holds separate reference and search configurations. The reference range is converted to timezone-aware API boundaries and sent through the typed `marketData` client. After that succeeds, the search configuration is sent through a separately typed similarity-search client using the exact Phase 6 HTTP contract.
 
 ```text
 reference form → typed HTTP client → FastAPI route → MarketDataService
                                                       ├── SQLite cache
                                                       └── Twelve Data (when needed)
-API bars → exact close values → responsive Recharts line chart
-search range ─────────────────→ local future-search context only
+API bars → exact close values → responsive Recharts reference chart
+search form → typed similarity client → ranked result cards + statistics
+selected match → lazy exact-period market-data request → comparison charts
 ```
 
 Daily inputs use calendar-day boundaries; intraday inputs use the browser's local date-time control and are serialized as UTC ISO 8601 values. Public API error codes are mapped to safe, actionable UI messages without exposing provider payloads or credentials.
+
+### Phase 7 UI state and previews
+
+The loaded reference records the exact submitted query separately from editable form state. Editing any reference field aborts an in-flight reference request and invalidates the loaded chart, search response, selection, and previews, so stale results cannot be represented as belonging to a new reference. Editing search dates, candidate symbols, result count, or threshold clears only search-derived state and preserves the loaded reference.
+
+Candidate symbols are normalized to uppercase, trimmed, de-duplicated, and capped at 10 in the browser; the backend independently enforces the same limit. Search submission is disabled without a loaded reference and while a request is active. Results retain backend ranking and present the score as an engineered similarity measure—not a probability or prediction.
+
+Result charts are deliberately lazy. A preview or selection calls the existing market-data endpoint with that match's exact symbol, start, end, and interval. Failures are local to that preview and never remove the match. The optional comparison overlay linearly aligns the returned observations by relative position and rebases each series to 100 for display only. It does not reproduce or alter Similarity Engine V1 scoring.
 
 ## Backend packages
 
@@ -114,4 +123,4 @@ Twelve Data-specific error bodies are translated to stable internal exceptions. 
 
 ## Phase boundary
 
-Phase 6 adds on-demand historical scanning and global ranking for up to 10 caller-supplied symbols. Full-market discovery/scanning, similarity-result UI, prediction, background jobs, and authentication remain out of scope.
+Phase 7 adds the user-facing workflow for the existing on-demand scanner, including ranked results, lazy previews, selection, and comparison. Full-market discovery/scanning, result persistence, prediction, background jobs, deployment, and authentication remain out of scope.
