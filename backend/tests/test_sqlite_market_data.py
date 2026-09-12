@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -138,3 +138,36 @@ async def test_rejects_misaligned_batch_without_writes(tmp_path: Path) -> None:
         await repository.upsert_time_series([series()], [], source="test")
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM market_bars").fetchone() == (0,)
+
+
+@pytest.mark.anyio
+async def test_scan_readiness_accepts_sub_interval_daily_boundary_offset(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteMarketDataRepository(tmp_path / "market.sqlite3")
+    await repository.initialize()
+    covered_start = datetime(2024, 1, 1, 5, tzinfo=UTC)
+    covered_end = datetime(2024, 1, 3, 4, 59, 59, tzinfo=UTC)
+    await repository.upsert_time_series(
+        [series(bars=(bar(1, "100", hour=5), bar(2, "101", hour=5)))],
+        [CoverageRange(covered_start, covered_end, datetime(2024, 2, 1, tzinfo=UTC))],
+        source="test",
+    )
+
+    ready = await repository.get_scan_ready_symbols(
+        ["AAPL"],
+        BarInterval.ONE_DAY,
+        datetime(2024, 1, 1, tzinfo=UTC),
+        datetime(2024, 1, 2, 23, 59, 59, tzinfo=UTC),
+        2,
+    )
+    missing_full_bar = await repository.get_scan_ready_symbols(
+        ["AAPL"],
+        BarInterval.ONE_DAY,
+        covered_start - timedelta(days=1),
+        covered_end,
+        2,
+    )
+
+    assert ready == ("AAPL",)
+    assert missing_full_bar == ()

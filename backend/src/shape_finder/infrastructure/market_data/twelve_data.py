@@ -141,9 +141,11 @@ class TwelveDataProvider:
             raise MalformedProviderResponseError(
                 "Provider stock catalog is missing its data array."
             )
+        items = payload["data"]
         records: list[SymbolMetadata] = []
-        try:
-            for item in payload["data"]:
+        malformed_count = 0
+        for item in items:
+            try:
                 if not isinstance(item, dict):
                     raise TypeError
                 required = ("symbol", "name", "exchange", "country", "type", "currency")
@@ -169,10 +171,11 @@ class TwelveDataProvider:
                         active=active,
                     )
                 )
-        except (KeyError, TypeError) as error:
-            raise MalformedProviderResponseError(
-                "Provider returned malformed stock metadata."
-            ) from error
+            except (KeyError, TypeError):
+                malformed_count += 1
+                continue
+        if not records or malformed_count / len(items) > 0.01:
+            raise MalformedProviderResponseError("Provider returned malformed stock metadata.")
         return tuple(records)
 
     @staticmethod

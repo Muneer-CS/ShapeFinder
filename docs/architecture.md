@@ -78,6 +78,10 @@ The 100-symbol scan used 4.2 MiB peak traced Python memory. In a separate end-to
 
 `MarketDataProvider.get_historical_bars` retrieves normalized external data. `MarketDataRepository` stores and queries normalized bars plus synchronization coverage. `MarketDataService` depends only on these protocols. `SimilarityEngine` isolates numerical analysis, while `SimilarityResultRepository` remains the boundary for future result storage.
 
+`real_market_validation` is a developer-only application utility. It depends on the same market-data loader and scanner contracts as the API, measures loading separately from scanning, and serializes stable summaries without exposing provider requests or credentials. Its data-quality diagnostics report suspicious input but do not mutate, fill, or reject valid market gaps. The CLI composes this utility with the production Twelve Data and SQLite adapters; tests compose it with fixtures, so normal verification never requires network access.
+
+Phase 10 live validation found two non-scoring boundary defects. The provider's 16,412-row stock response contained one blank-name row; the adapter now skips isolated malformed catalog rows while continuing to reject a catalog with no valid records. Daily cache coverage stored with exchange-local boundaries could also be less than one interval offset from an equivalent UTC UI range. Scan readiness now mirrors `MarketDataService` gap semantics: a sub-interval initial offset is covered, while a missing full bar still makes the symbol ineligible. Both behaviors have focused regression tests.
+
 ## Similarity Engine V1
 
 `ChartSimilarityEngine` is a synchronous, side-effect-free application component implementing the core `SimilarityEngine` protocol. It compares two explicitly supplied sequences of close prices and returns an immutable `SimilarityScore`. It has no API, database, provider, or UI dependency.
@@ -163,4 +167,4 @@ Twelve Data-specific error bodies are translated to stable internal exceptions. 
 
 ## Phase boundary
 
-Phase 9 adds bounded vectorized similarity scanning, strict scalar-equivalence coverage, repeatable performance/memory/database benchmarks, and deterministic SQLite connection cleanup. The Similarity Engine V1 formula, public API, frontend behavior, coverage semantics, and Phase 8 safety limits remain unchanged. Automatic or background hydration, authoritative index membership, result persistence, prediction, distributed workers, deployment, and authentication remain out of scope.
+Phase 10 validates the production provider/cache/scanner/UI path on a bounded real-market sample, adds developer validation and data-quality reporting, and fixes isolated malformed catalog rows plus equivalent daily cache boundaries. The Similarity Engine V1 formula and weights, public API, frontend behavior, overlap rules, and safety limits remain unchanged. Statistical calibration, session-aware intraday windows, automatic or background hydration, authoritative index membership, result persistence, prediction, distributed workers, deployment, and authentication remain out of scope.

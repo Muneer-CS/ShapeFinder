@@ -377,8 +377,11 @@ def _coverage_contains(
     for index, (range_start, range_end) in enumerate(ranges):
         range_start_at = datetime.fromisoformat(range_start)
         range_end_at = datetime.fromisoformat(range_end)
-        allowed_start = cursor if index == 0 else cursor + steps[interval]
-        if range_start_at > allowed_start:
+        allowed_start = cursor + steps[interval]
+        starts_after_gap = (
+            range_start_at >= allowed_start if index == 0 else range_start_at > allowed_start
+        )
+        if starts_after_gap:
             return False
         if range_end_at >= requested_end:
             return True

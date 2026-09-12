@@ -434,6 +434,10 @@ async def test_twelve_data_stock_catalog_parser_and_error_mapping() -> None:
             return await TwelveDataProvider(client, "key", retry_attempts=1).list_stocks()
 
     assert (await fetch(success))[0].symbol == "AAPL"
+    with_incomplete_row = {"data": success["data"] * 100 + [{**success["data"][0], "name": ""}]}
+    assert len(await fetch(with_incomplete_row)) == 100
+    with pytest.raises(MalformedProviderResponseError):
+        await fetch({"data": [success["data"][0], {**success["data"][0], "name": ""}]})
     with pytest.raises(MalformedProviderResponseError):
         await fetch({"data": [{"symbol": "AAPL"}]})
     with pytest.raises(MalformedProviderResponseError):

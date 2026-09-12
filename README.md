@@ -2,9 +2,9 @@
 
 ShapeFinder is the foundation for a stock-chart similarity application. The future product will compare normalized chart behaviour across securities and historical periods; it is not a forecasting or trading-recommendation tool.
 
-## Current scope: Phase 9
+## Current scope: Phase 10
 
-ShapeFinder supports provider-independent stock universes in addition to the existing custom list of up to 10 tickers. Users can select U.S. common stocks, NASDAQ common stocks, NYSE common stocks, or Custom. Broad searches are deliberately cached-only: ShapeFinder scans the members with complete local history and reports total, eligible, scanned, and skipped counts rather than implying full coverage. Phase 9 accelerates the same deterministic Similarity Engine V1 computation with bounded NumPy batches; the formula, public API, ranking policy, and UI are unchanged. ShapeFinder still does **not** hydrate an entire market, predict prices, or make recommendations.
+ShapeFinder supports provider-independent stock universes in addition to the existing custom list of up to 10 tickers. Users can select U.S. common stocks, NASDAQ common stocks, NYSE common stocks, or Custom. Broad searches are deliberately cached-only: ShapeFinder scans the members with complete local history and reports total, eligible, scanned, and skipped counts rather than implying full coverage. Phase 10 adds a quota-conscious real-market validation workflow and hardens isolated catalog-row and daily cache-boundary behavior discovered against Twelve Data. Similarity Engine V1, its weights, the public API, ranking policy, and UI remain unchanged. ShapeFinder still does **not** hydrate an entire market, predict prices, or make recommendations.
 
 ## Architecture
 
@@ -80,6 +80,12 @@ SQLite is the initial persistence adapter. By default, the backend creates `data
 Schema changes use small, ordered application migrations recorded in `schema_migrations`, so upgrades do not require deleting the database. OHLCV values are stored as decimal strings to preserve exact provider precision. The composite primary key `(symbol, interval, timestamp_utc)` both prevents duplicates and supports chronological range queries. Successful synchronization ranges are recorded separately, including source and synchronization time.
 
 Writes use one transaction and batch upserts. A repeated or revised provider bar updates the existing row, allowing current data and corrections to replace stale values without duplicates.
+
+## Real-market validation
+
+The developer-facing validation CLI runs a bounded custom-symbol experiment through the production provider, SQLite cache, and optimized scanner. It reports component scores, exact periods, timings, and non-destructive data-quality diagnostics; optional JSON output belongs in the ignored `backend/validation-output/` directory. It never embeds or prints the API key. See [the real-market validation runbook](docs/real-market-validation.md) for secure setup, quota controls, fixed short/medium/long daily cases, the optional intraday case, and the qualitative chart-review protocol.
+
+The Phase 10 live sample covered five liquid stocks and 1-day/5-minute intervals. It is intentionally too small to support statistical calibration or descriptive score bands. High shape-component scores on smooth trends were moderated by direction and fitted-path error, no suspicious near-100 overall matches appeared, and the score formula was not changed.
 
 ### Synchronization and freshness
 
