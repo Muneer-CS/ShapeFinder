@@ -7,9 +7,9 @@ from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from shape_finder.core.errors import MalformedProviderResponseError
+from shape_finder.core.errors import CacheError, MalformedProviderResponseError
 from shape_finder.core.market_data import BarInterval, PriceBar, TimeSeries, validate_time_series
-from shape_finder.core.persistence import CoverageRange
+from shape_finder.core.persistence import CoverageRange, HydrationFailureRecord
 from shape_finder.core.universe import SymbolMetadata
 from shape_finder.infrastructure.persistence.migrations import MIGRATIONS
 
@@ -164,7 +164,10 @@ class SQLiteMarketDataRepository:
         *,
         source: str,
     ) -> None:
-        await asyncio.to_thread(self._upsert_time_series_sync, series, coverage, source)
+        try:
+            await asyncio.to_thread(self._upsert_time_series_sync, series, coverage, source)
+        except sqlite3.Error as error:
+            raise CacheError("Market-data cache write failed.") from error
 
     def _upsert_time_series_sync(
         self,
@@ -333,6 +336,100 @@ class SQLiteMarketDataRepository:
             end,
             minimum_bars,
         )
+
+    async def get_suppressed_hydration_symbols(
+        self,
+        symbols: Sequence[str],
+        interval: BarInterval,
+        start: datetime,
+        end: datetime,
+        now: datetime,
+    ) -> Sequence[str]:
+        return await asyncio.to_thread(
+            self._get_suppressed_hydration_symbols_sync,
+            symbols,
+            interval,
+            start,
+            end,
+            now,
+        )
+
+    def _get_suppressed_hydration_symbols_sync(
+        self,
+        symbols: Sequence[str],
+        interval: BarInterval,
+        start: datetime,
+        end: datetime,
+        now: datetime,
+    ) -> tuple[str, ...]:
+        wanted = tuple(dict.fromkeys(symbol.upper() for symbol in symbols))
+        if not wanted:
+            return ()
+        found: list[str] = []
+        with closing(self._connect()) as connection:
+            for offset in range(0, len(wanted), 400):
+                batch = wanted[offset : offset + 400]
+                placeholders = ",".join("?" for _ in batch)
+                rows = connection.execute(
+                    f"""
+                    SELECT symbol FROM hydration_failures
+                    WHERE symbol IN ({placeholders}) AND interval = ?
+                      AND start_utc = ? AND end_utc = ? AND retry_after_utc > ?
+                    """,
+                    (
+                        *batch,
+                        interval.value,
+                        _utc_text(start),
+                        _utc_text(end),
+                        _utc_text(now),
+                    ),
+                ).fetchall()
+                found.extend(str(row["symbol"]) for row in rows)
+        return tuple(sorted(found))
+
+    async def record_hydration_failure(self, record: HydrationFailureRecord) -> None:
+        await asyncio.to_thread(self._record_hydration_failure_sync, record)
+
+    def _record_hydration_failure_sync(self, record: HydrationFailureRecord) -> None:
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO hydration_failures(
+                    symbol, interval, start_utc, end_utc, category,
+                    failed_at_utc, retry_after_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol, interval, start_utc, end_utc) DO UPDATE SET
+                    category = excluded.category,
+                    failed_at_utc = excluded.failed_at_utc,
+                    retry_after_utc = excluded.retry_after_utc
+                """,
+                (
+                    record.symbol.upper(),
+                    record.interval.value,
+                    _utc_text(record.start),
+                    _utc_text(record.end),
+                    record.category,
+                    _utc_text(record.failed_at),
+                    _utc_text(record.retry_after),
+                ),
+            )
+
+    async def clear_hydration_failure(
+        self, symbol: str, interval: BarInterval, start: datetime, end: datetime
+    ) -> None:
+        await asyncio.to_thread(self._clear_hydration_failure_sync, symbol, interval, start, end)
+
+    def _clear_hydration_failure_sync(
+        self, symbol: str, interval: BarInterval, start: datetime, end: datetime
+    ) -> None:
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
+                DELETE FROM hydration_failures
+                WHERE symbol = ? AND interval = ? AND start_utc = ? AND end_utc = ?
+                """,
+                (symbol.upper(), interval.value, _utc_text(start), _utc_text(end)),
+            )
 
     def _get_scan_ready_symbols_sync(
         self,

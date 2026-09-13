@@ -67,8 +67,14 @@ export type SimilaritySearchResponse = {
     hydration_attempted: number
     hydration_succeeded: number
     hydration_failed: number
+    hydration_fetched: number
+    hydration_persisted: number
+    hydration_became_ready: number
+    hydration_suppressed: number
+    hydration_failure_counts: Record<string, number>
     ready_after_hydration: number
     provider_rate_limited: boolean
+    provider_daily_quota: boolean
     hydration_provider_unavailable: boolean
     hydration_timed_out: boolean
   }
@@ -136,8 +142,15 @@ function isSimilaritySearchResponse(
     isNumber(statistics.hydration_attempted) &&
     isNumber(statistics.hydration_succeeded) &&
     isNumber(statistics.hydration_failed) &&
+    isNumber(statistics.hydration_fetched) &&
+    isNumber(statistics.hydration_persisted) &&
+    isNumber(statistics.hydration_became_ready) &&
+    isNumber(statistics.hydration_suppressed) &&
+    !!statistics.hydration_failure_counts &&
+    typeof statistics.hydration_failure_counts === 'object' &&
     isNumber(statistics.ready_after_hydration) &&
     typeof statistics.provider_rate_limited === 'boolean' &&
+    typeof statistics.provider_daily_quota === 'boolean' &&
     typeof statistics.hydration_provider_unavailable === 'boolean' &&
     typeof statistics.hydration_timed_out === 'boolean'
   )

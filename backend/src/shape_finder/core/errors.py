@@ -26,6 +26,18 @@ class RateLimitError(MarketDataError):
     pass
 
 
+class DailyQuotaError(RateLimitError):
+    """Provider daily credit allowance is exhausted."""
+
+
+class ProviderRejectedError(MarketDataError):
+    """Provider rejected an otherwise well-formed request."""
+
+    def __init__(self, message: str, *, provider_code: int | str | None = None) -> None:
+        super().__init__(message)
+        self.provider_code = provider_code
+
+
 class ProviderNetworkError(MarketDataError):
     pass
 
@@ -36,6 +48,10 @@ class MalformedProviderResponseError(MarketDataError):
 
 class NoDataError(MarketDataError):
     pass
+
+
+class CacheError(MarketDataError):
+    """Persistent market-data storage failed."""
 
 
 class ScanTimeoutError(Exception):

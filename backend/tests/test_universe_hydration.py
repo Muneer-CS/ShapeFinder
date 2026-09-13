@@ -14,7 +14,13 @@ from shape_finder.application.similarity_search import (
 )
 from shape_finder.application.universe import UniverseService
 from shape_finder.application.universe_hydration import UniverseHydrationService
-from shape_finder.core.errors import NoDataError, ProviderNetworkError, RateLimitError
+from shape_finder.core.errors import (
+    DailyQuotaError,
+    NoDataError,
+    ProviderNetworkError,
+    ProviderRejectedError,
+    RateLimitError,
+)
 from shape_finder.core.market_data import BarInterval, PriceBar, TimeSeries
 from shape_finder.core.persistence import CoverageRange
 from shape_finder.core.similarity_search import SimilaritySearchQuery
@@ -115,6 +121,7 @@ async def services(
         max_symbols=max_symbols,
         intraday_max_symbols=intraday_max_symbols,
         timeout_seconds=timeout_seconds,
+        clock=lambda: NOW,
     )
     return repository, market, universe, hydration
 
@@ -134,10 +141,11 @@ async def test_zero_ready_hydrates_bounded_batch_then_progresses_without_refetch
 
     assert first.hydration_limit == first.attempted == first.succeeded == 2
     assert len(first.ready_before) == 0
-    assert first.ready_after == ("AAA", "BBB")
-    assert second.ready_before == ("AAA", "BBB")
+    assert len(first.ready_after) == 2
+    assert second.ready_before == first.ready_after
     assert second.ready_after == ("AAA", "BBB", "CCC", "DDD")
-    assert [call[0] for call in provider.calls] == ["AAA", "BBB", "CCC", "DDD"]
+    assert len(provider.calls) == 4
+    assert {call[0] for call in provider.calls} == {"AAA", "BBB", "CCC", "DDD"}
     assert all(call[1:] == (START, END, BarInterval.ONE_DAY) for call in provider.calls)
 
     reopened = SQLiteMarketDataRepository(tmp_path / "hydration.sqlite3")
@@ -153,7 +161,7 @@ async def test_zero_ready_hydrates_bounded_batch_then_progresses_without_refetch
     [
         (UniverseKind.NASDAQ, "AAA"),
         (UniverseKind.NYSE, "IBM"),
-        (UniverseKind.US_EQUITIES, "AAA"),
+        (UniverseKind.US_EQUITIES, "IBM"),
     ],
 )
 async def test_named_universe_selection_is_respected(
@@ -174,8 +182,8 @@ async def test_rate_limit_preserves_success_and_next_search_advances(tmp_path: P
     provider = HydrationProvider(
         [metadata(symbol) for symbol in ("AAA", "BBB", "CCC")],
         {
-            "AAA": series("AAA"),
-            "BBB": RateLimitError(),
+            "AAA": RateLimitError(),
+            "BBB": series("BBB"),
             "CCC": series("CCC"),
         },
     )
@@ -187,9 +195,9 @@ async def test_rate_limit_preserves_success_and_next_search_advances(tmp_path: P
     assert first.succeeded == 1
     assert first.failed == 1
     assert first.provider_rate_limited
-    assert first.ready_after == ("AAA",)
-    assert second.ready_after == ("AAA", "CCC")
-    assert [call[0] for call in provider.calls] == ["AAA", "BBB", "CCC", "BBB"]
+    assert first.ready_after == ("CCC",)
+    assert second.ready_after == ("BBB", "CCC")
+    assert [call[0] for call in provider.calls] == ["CCC", "AAA", "BBB", "AAA"]
 
 
 @pytest.mark.anyio
@@ -202,6 +210,68 @@ async def test_no_data_for_one_symbol_does_not_block_later_symbols(tmp_path: Pat
     result = await hydration.hydrate(UniverseKind.NASDAQ, START, END, BarInterval.ONE_DAY, 9)
     assert (result.attempted, result.succeeded, result.failed) == (2, 1, 1)
     assert result.ready_after == ("BBB",)
+    assert result.failure_counts == {"no_data": 1}
+    assert (result.fetched, result.persisted, result.became_ready) == (1, 1, 1)
+
+
+@pytest.mark.anyio
+async def test_permanent_failure_cooldown_skips_immediate_repeat_and_tries_next(
+    tmp_path: Path,
+) -> None:
+    provider = HydrationProvider(
+        [metadata("AAA"), metadata("BBB")],
+        {"AAA": ProviderRejectedError("rejected", provider_code=400), "BBB": series("BBB")},
+    )
+    repository, _, _, hydration = await services(tmp_path, provider, max_symbols=1)
+
+    first = await hydration.hydrate(UniverseKind.NASDAQ, START, END, BarInterval.ONE_DAY, 9)
+    second = await hydration.hydrate(UniverseKind.NASDAQ, START, END, BarInterval.ONE_DAY, 9)
+
+    assert first.failure_counts == {"provider_rejected": 1}
+    assert await repository.get_suppressed_hydration_symbols(
+        ("AAA",), BarInterval.ONE_DAY, START, END, NOW
+    ) == ("AAA",)
+    assert second.suppressed == 1
+    assert second.became_ready == 1
+    assert [call[0] for call in provider.calls] == ["AAA", "BBB"]
+
+
+@pytest.mark.anyio
+async def test_transient_failure_remains_retryable(tmp_path: Path) -> None:
+    provider = HydrationProvider([metadata("AAA")], {"AAA": ProviderNetworkError()})
+    _, _, _, hydration = await services(tmp_path, provider, max_symbols=1)
+    first = await hydration.hydrate(UniverseKind.NASDAQ, START, END, BarInterval.ONE_DAY, 9)
+    provider.data["AAA"] = series("AAA")
+    second = await hydration.hydrate(UniverseKind.NASDAQ, START, END, BarInterval.ONE_DAY, 9)
+    assert first.failure_counts == {"provider_unavailable": 1}
+    assert second.became_ready == 1
+    assert [call[0] for call in provider.calls] == ["AAA", "AAA"]
+
+
+@pytest.mark.anyio
+async def test_fetch_success_with_insufficient_bars_is_classified_separately(
+    tmp_path: Path,
+) -> None:
+    provider = HydrationProvider([metadata("AAA")], {"AAA": series("AAA", count=5)})
+    _, _, _, hydration = await services(tmp_path, provider)
+    result = await hydration.hydrate(UniverseKind.NASDAQ, START, END, BarInterval.ONE_DAY, 9)
+    assert (result.fetched, result.persisted, result.became_ready) == (1, 1, 0)
+    assert result.failure_counts == {"insufficient_coverage": 1}
+    assert result.ready_after == ()
+
+
+@pytest.mark.anyio
+async def test_daily_quota_stops_batch_with_distinct_status(tmp_path: Path) -> None:
+    provider = HydrationProvider(
+        [metadata("AAA"), metadata("BBB")],
+        {"AAA": DailyQuotaError(), "BBB": series("BBB")},
+    )
+    _, _, _, hydration = await services(tmp_path, provider)
+    result = await hydration.hydrate(UniverseKind.NASDAQ, START, END, BarInterval.ONE_DAY, 9)
+    assert result.provider_daily_quota
+    assert not result.provider_rate_limited
+    assert result.failure_counts == {"provider_daily_quota": 1}
+    assert [call[0] for call in provider.calls] == ["AAA"]
 
 
 @pytest.mark.anyio
@@ -243,11 +313,15 @@ async def test_search_scans_newly_hydrated_symbols_and_reports_exact_metadata(
     assert statistics.hydration_limit == statistics.hydration_attempted == 2
     assert statistics.hydration_succeeded == 2
     assert statistics.hydration_failed == 0
+    assert statistics.hydration_fetched == 2
+    assert statistics.hydration_persisted == 2
+    assert statistics.hydration_became_ready == 2
+    assert statistics.hydration_failure_counts == {}
     assert statistics.ready_after_hydration == statistics.symbols_eligible == 2
     assert statistics.symbols_scanned == 2
     assert statistics.symbols_skipped == 1
     assert statistics.windows_evaluated > 0
-    assert {match.symbol for match in result.matches} <= {"AAA", "BBB"}
+    assert {match.symbol for match in result.matches} <= {"AAA", "CCC"}
 
 
 @pytest.mark.anyio

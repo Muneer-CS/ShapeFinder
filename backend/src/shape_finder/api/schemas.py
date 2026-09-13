@@ -147,8 +147,14 @@ class ScanStatisticsResponse(BaseModel):
     hydration_attempted: int
     hydration_succeeded: int
     hydration_failed: int
+    hydration_fetched: int
+    hydration_persisted: int
+    hydration_became_ready: int
+    hydration_suppressed: int
+    hydration_failure_counts: dict[str, int]
     ready_after_hydration: int
     provider_rate_limited: bool
+    provider_daily_quota: bool
     hydration_provider_unavailable: bool
     hydration_timed_out: bool
 

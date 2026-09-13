@@ -10,11 +10,13 @@ import httpx
 
 from shape_finder.core.errors import (
     AuthenticationError,
+    DailyQuotaError,
     InvalidSymbolError,
     MalformedProviderResponseError,
     MissingApiKeyError,
     NoDataError,
     ProviderNetworkError,
+    ProviderRejectedError,
     RateLimitError,
     UnsupportedIntervalError,
 )
@@ -145,7 +147,18 @@ class TwelveDataProvider:
                     "Market-data provider returned invalid JSON."
                 ) from error
 
-            self._raise_for_provider_error(response.status_code, payload)
+            try:
+                self._raise_for_provider_error(response.status_code, payload)
+            except Exception as error:
+                logger.warning(
+                    "provider_response_error endpoint=%s symbol=%s status=%s code=%s category=%s",
+                    endpoint,
+                    params.get("symbol"),
+                    response.status_code,
+                    getattr(error, "provider_code", None),
+                    _failure_category(error),
+                )
+                raise
             return payload
 
         raise ProviderNetworkError("Market-data provider request failed.")
@@ -204,14 +217,64 @@ class TwelveDataProvider:
         message = str(payload.get("message", "")) if isinstance(payload, dict) else ""
         lowered = message.lower()
         if code in {401, 403} or "api key" in lowered or "apikey" in lowered:
-            raise AuthenticationError("Market-data provider rejected its credentials.")
+            if code == 403 and "api key" not in lowered and "apikey" not in lowered:
+                raise _provider_error(
+                    ProviderRejectedError(
+                        "The market-data plan does not permit this request.", provider_code=code
+                    ),
+                    status_code,
+                    code,
+                )
+            raise _provider_error(
+                AuthenticationError("Market-data provider rejected its credentials."),
+                status_code,
+                code,
+            )
         if code == 429:
-            raise RateLimitError("Market-data provider rate limit exceeded.")
+            if "daily" in lowered and any(term in lowered for term in ("credit", "limit", "quota")):
+                raise _provider_error(
+                    DailyQuotaError("Market-data provider daily quota exhausted."),
+                    status_code,
+                    code,
+                )
+            raise _provider_error(
+                RateLimitError("Market-data provider rate limit exceeded."),
+                status_code,
+                code,
+            )
+        if code == 404 or any(
+            term in lowered
+            for term in (
+                "no data",
+                "data is not available",
+                "data not available",
+                "specified dates",
+                "could not be found",
+            )
+        ):
+            raise _provider_error(
+                NoDataError("No market data exists for the requested period."),
+                status_code,
+                code,
+            )
         if "symbol" in lowered and any(term in lowered for term in ("invalid", "not found")):
-            raise InvalidSymbolError("Unknown symbol or no supported instrument found.")
+            raise _provider_error(
+                InvalidSymbolError("Unknown symbol or no supported instrument found."),
+                status_code,
+                code,
+            )
         if code == 400:
-            raise InvalidSymbolError("The provider rejected the requested symbol or parameters.")
-        raise ProviderNetworkError("Market-data provider request failed.")
+            raise _provider_error(
+                ProviderRejectedError(
+                    "The provider rejected the requested symbol or parameters.",
+                    provider_code=code,
+                ),
+                status_code,
+                code,
+            )
+        raise _provider_error(
+            ProviderNetworkError("Market-data provider request failed."), status_code, code
+        )
 
     @staticmethod
     def _parse_time_series(payload: Any, interval: BarInterval) -> TimeSeries:
@@ -278,3 +341,28 @@ class TwelveDataProvider:
         except ValueError as error:
             raise MalformedProviderResponseError("Provider returned invalid OHLCV data.") from error
         return series
+
+
+def _provider_error(
+    error: Exception, status_code: int, provider_code: int | str | None
+) -> Exception:
+    """Attach safe diagnostics without retaining provider payloads or request secrets."""
+    error.provider_status = status_code  # type: ignore[attr-defined]
+    error.provider_code = provider_code  # type: ignore[attr-defined]
+    return error
+
+
+def _failure_category(error: Exception) -> str:
+    if isinstance(error, DailyQuotaError):
+        return "provider_daily_quota"
+    if isinstance(error, RateLimitError):
+        return "provider_rate_limited"
+    if isinstance(error, NoDataError):
+        return "no_data"
+    if isinstance(error, InvalidSymbolError):
+        return "unsupported_symbol"
+    if isinstance(error, ProviderRejectedError):
+        return "provider_rejected"
+    if isinstance(error, AuthenticationError):
+        return "authentication"
+    return "provider_unavailable"

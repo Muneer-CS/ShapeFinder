@@ -343,9 +343,19 @@ class SimilaritySearchService:
                 hydration_attempted=(hydration.attempted if hydration is not None else 0),
                 hydration_succeeded=(hydration.succeeded if hydration is not None else 0),
                 hydration_failed=(hydration.failed if hydration is not None else 0),
+                hydration_fetched=(hydration.fetched if hydration is not None else 0),
+                hydration_persisted=(hydration.persisted if hydration is not None else 0),
+                hydration_became_ready=(hydration.became_ready if hydration is not None else 0),
+                hydration_suppressed=(hydration.suppressed if hydration is not None else 0),
+                hydration_failure_counts=(
+                    hydration.failure_counts if hydration is not None else {}
+                ),
                 ready_after_hydration=len(eligible),
                 provider_rate_limited=(
                     hydration.provider_rate_limited if hydration is not None else False
+                ),
+                provider_daily_quota=(
+                    hydration.provider_daily_quota if hydration is not None else False
                 ),
                 hydration_provider_unavailable=(
                     hydration.provider_unavailable if hydration is not None else False

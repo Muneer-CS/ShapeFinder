@@ -70,4 +70,25 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=3,
+        statements=(
+            """
+            CREATE TABLE hydration_failures (
+                symbol TEXT NOT NULL,
+                interval TEXT NOT NULL,
+                start_utc TEXT NOT NULL,
+                end_utc TEXT NOT NULL,
+                category TEXT NOT NULL,
+                failed_at_utc TEXT NOT NULL,
+                retry_after_utc TEXT NOT NULL,
+                PRIMARY KEY (symbol, interval, start_utc, end_utc)
+            ) WITHOUT ROWID
+            """,
+            """
+            CREATE INDEX hydration_failures_retry_idx
+            ON hydration_failures(retry_after_utc)
+            """,
+        ),
+    ),
 )

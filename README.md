@@ -118,7 +118,9 @@ Universe metadata comes from Twelve Data's stock reference endpoint and is conse
 
 Named-universe searches first reuse every scan-ready local history, then hydrate a small backend-controlled batch of missing symbols through the normal cache-aware market-data service. The default batch is 5 daily symbols and 2 intraday symbols, with a 15-second hydration budget. Afterward, ShapeFinder scans all currently ready symbols and reports the known, ready-before, hydrated, scanned, and skipped counts so partial coverage is explicit. Custom searches retain their existing behavior.
 
-Selection is stable by ticker and skips histories that are already ready. Within a running backend process, a per-search-context cursor rotates past attempted failures so repeated searches progress instead of getting stuck. Successful histories and coverage records persist in SQLite across restarts; the lightweight failure cursor does not.
+Selection uses a stable hash order so each bounded batch is spread across the universe instead of being biased toward one alphabetical cluster. Histories that are already ready are skipped. Successful histories and coverage records persist in SQLite across restarts.
+
+Provider failures are classified without exposing provider payloads or credentials. Range-specific `no_data`, unsupported-symbol, provider-rejection, and insufficient-coverage outcomes are stored in SQLite with a cooldown (seven days for permanent provider outcomes; one day for insufficient coverage). Rate limits, daily quota exhaustion, timeouts, and transient provider failures stop or defer work but are not persistently suppressed, so they remain retryable. Search statistics separately report provider attempts, fetched and persisted histories, newly scan-ready symbols, suppressed candidates, and safe failure-category counts.
 
 ## Data and cache behavior
 

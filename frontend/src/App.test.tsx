@@ -84,8 +84,14 @@ const searchSuccess = (items = matches) => ({
     hydration_attempted: 0,
     hydration_succeeded: 0,
     hydration_failed: 0,
+    hydration_fetched: 0,
+    hydration_persisted: 0,
+    hydration_became_ready: 0,
+    hydration_suppressed: 0,
+    hydration_failure_counts: {},
     ready_after_hydration: 3,
     provider_rate_limited: false,
+    provider_daily_quota: false,
     hydration_provider_unavailable: false,
     hydration_timed_out: false,
   },
@@ -380,6 +386,9 @@ describe('similarity search workflow', () => {
       hydration_limit: 5,
       hydration_attempted: 5,
       hydration_succeeded: 5,
+      hydration_fetched: 5,
+      hydration_persisted: 5,
+      hydration_became_ready: 5,
       ready_after_hydration: 812,
     }
     mockApi({ search: response(partial) })
@@ -391,7 +400,7 @@ describe('similarity search workflow', () => {
       screen.getByText(/Scanned 812 of 3,921 known stocks/),
     ).toBeInTheDocument()
     expect(
-      screen.getByText(/5 additional stocks were added to the search cache/),
+      screen.getByText(/Added 5 additional stocks to local coverage/),
     ).toBeInTheDocument()
     expect(
       screen.getByText(/3,109 still lacked complete cached history/),
@@ -413,6 +422,9 @@ describe('similarity search workflow', () => {
       hydration_attempted: 2,
       hydration_succeeded: 1,
       hydration_failed: 1,
+      hydration_fetched: 1,
+      hydration_persisted: 1,
+      hydration_became_ready: 1,
       ready_after_hydration: 4,
       provider_rate_limited: true,
     }
@@ -422,7 +434,7 @@ describe('similarity search workflow', () => {
     fireEvent.click(screen.getByRole('radio', { name: /NASDAQ/ }))
     await runSearch()
     expect(
-      screen.getByText(/1 additional stock was added to the search cache/),
+      screen.getByText(/Added 1 additional stock to local coverage/),
     ).toBeInTheDocument()
     expect(
       screen.getByText(
@@ -430,6 +442,35 @@ describe('similarity search workflow', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.queryByText(/TWELVE_DATA_API_KEY/)).not.toBeInTheDocument()
+  })
+
+  it('distinguishes daily quota and insufficient-history messages', async () => {
+    const partial = searchSuccess([])
+    partial.statistics = {
+      ...partial.statistics,
+      universe_id: 'nasdaq',
+      universe_symbols_total: 1800,
+      symbols_requested: 1800,
+      symbols_eligible: 1,
+      symbols_scanned: 1,
+      symbols_skipped: 1799,
+      hydration_attempted: 1,
+      hydration_failed: 1,
+      hydration_failure_counts: { insufficient_coverage: 1 },
+      provider_daily_quota: true,
+    }
+    mockApi({ search: response(partial) })
+    render(<App />)
+    await loadReference()
+    fireEvent.click(screen.getByRole('radio', { name: /NASDAQ/ }))
+    await runSearch()
+    expect(
+      screen.getByText(/provider daily quota is exhausted/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/did not have enough usable history/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/response body|apikey/i)).not.toBeInTheDocument()
   })
 
   it('shows a clear state when a universe has no scan-ready stocks', async () => {

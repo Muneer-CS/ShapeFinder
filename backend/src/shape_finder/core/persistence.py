@@ -13,6 +13,17 @@ class CoverageRange:
     synced_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class HydrationFailureRecord:
+    symbol: str
+    interval: BarInterval
+    start: datetime
+    end: datetime
+    category: str
+    failed_at: datetime
+    retry_after: datetime
+
+
 class MarketDataRepository(Protocol):
     async def initialize(self) -> None: ...
 
@@ -40,6 +51,21 @@ class MarketDataRepository(Protocol):
         end: datetime,
         minimum_bars: int,
     ) -> Sequence[str]: ...
+
+    async def get_suppressed_hydration_symbols(
+        self,
+        symbols: Sequence[str],
+        interval: BarInterval,
+        start: datetime,
+        end: datetime,
+        now: datetime,
+    ) -> Sequence[str]: ...
+
+    async def record_hydration_failure(self, record: HydrationFailureRecord) -> None: ...
+
+    async def clear_hydration_failure(
+        self, symbol: str, interval: BarInterval, start: datetime, end: datetime
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)

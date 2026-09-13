@@ -835,22 +835,30 @@ function SearchResults({
                 {state.data.statistics.universe_symbols_total.toLocaleString()}{' '}
                 known stocks.
               </strong>{' '}
-              {state.data.statistics.hydration_succeeded > 0 && (
+              {state.data.statistics.hydration_became_ready > 0 && (
                 <>
-                  {state.data.statistics.hydration_succeeded.toLocaleString()}{' '}
+                  Added{' '}
+                  {state.data.statistics.hydration_became_ready.toLocaleString()}{' '}
                   additional{' '}
-                  {state.data.statistics.hydration_succeeded === 1
-                    ? 'stock was'
-                    : 'stocks were'}{' '}
-                  added to the search cache.{' '}
+                  {state.data.statistics.hydration_became_ready === 1
+                    ? 'stock'
+                    : 'stocks'}{' '}
+                  to local coverage.{' '}
                 </>
               )}
               {state.data.statistics.symbols_skipped.toLocaleString()} still
               lacked complete cached history for this interval and period.
-              {(state.data.statistics.provider_rate_limited ||
-                state.data.statistics.hydration_provider_unavailable ||
-                state.data.statistics.hydration_timed_out) &&
+              {state.data.statistics.provider_daily_quota &&
+                ' Cached stocks were searched, but market coverage could not expand because the provider daily quota is exhausted.'}
+              {!state.data.statistics.provider_daily_quota &&
+                (state.data.statistics.provider_rate_limited ||
+                  state.data.statistics.hydration_provider_unavailable ||
+                  state.data.statistics.hydration_timed_out) &&
                 ' Additional market history could not be loaded right now, but cached stocks were still searched.'}
+              {(state.data.statistics.hydration_failure_counts.no_data > 0 ||
+                state.data.statistics.hydration_failure_counts
+                  .insufficient_coverage > 0) &&
+                ' Some candidate stocks did not have enough usable history for this search.'}
               {state.data.statistics.universe_stale &&
                 ' Universe membership came from a stale local cache.'}
             </div>

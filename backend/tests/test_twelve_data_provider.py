@@ -8,11 +8,13 @@ import pytest
 
 from shape_finder.core.errors import (
     AuthenticationError,
+    DailyQuotaError,
     InvalidSymbolError,
     MalformedProviderResponseError,
     MissingApiKeyError,
     NoDataError,
     ProviderNetworkError,
+    ProviderRejectedError,
     RateLimitError,
 )
 from shape_finder.core.market_data import BarInterval
@@ -164,6 +166,70 @@ async def test_maps_provider_errors(payload: dict[str, Any], error_type: type[Ex
             "BAD",
             datetime(2025, 1, 1, tzinfo=UTC),
             datetime(2025, 1, 2, tzinfo=UTC),
+            BarInterval.ONE_DAY,
+        )
+
+
+@pytest.mark.anyio
+async def test_classifies_provider_style_date_range_no_data() -> None:
+    payload = {
+        "status": "error",
+        "code": 400,
+        "message": "No data is available on the specified dates.",
+    }
+    provider = provider_for(httpx.MockTransport(lambda _: httpx.Response(400, json=payload)))
+    with pytest.raises(NoDataError) as captured:
+        await provider.get_historical_bars(
+            "NEWIPO",
+            datetime(2024, 1, 2, tzinfo=UTC),
+            datetime(2024, 3, 29, tzinfo=UTC),
+            BarInterval.ONE_DAY,
+        )
+    assert captured.value.provider_code == 400  # type: ignore[attr-defined]
+
+
+@pytest.mark.anyio
+async def test_classifies_hard_provider_rejection_without_retry() -> None:
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            400,
+            json={"status": "error", "code": 400, "message": "Parameter not permitted"},
+        )
+
+    provider = provider_for(httpx.MockTransport(handler), attempts=3)
+    with pytest.raises(ProviderRejectedError):
+        await provider.get_historical_bars(
+            "AAPL",
+            datetime(2024, 1, 2, tzinfo=UTC),
+            datetime(2024, 3, 29, tzinfo=UTC),
+            BarInterval.ONE_DAY,
+        )
+    assert calls == 1
+
+
+@pytest.mark.anyio
+async def test_distinguishes_daily_quota_from_minute_rate_limit() -> None:
+    provider = provider_for(
+        httpx.MockTransport(
+            lambda _: httpx.Response(
+                429,
+                json={
+                    "status": "error",
+                    "code": 429,
+                    "message": "The daily API credits limit has been reached.",
+                },
+            )
+        )
+    )
+    with pytest.raises(DailyQuotaError):
+        await provider.get_historical_bars(
+            "AAPL",
+            datetime(2024, 1, 2, tzinfo=UTC),
+            datetime(2024, 3, 29, tzinfo=UTC),
             BarInterval.ONE_DAY,
         )
 

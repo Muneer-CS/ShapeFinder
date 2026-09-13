@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from shape_finder.core.market_data import BarInterval
@@ -61,8 +61,14 @@ class ScanStatistics:
     hydration_attempted: int = 0
     hydration_succeeded: int = 0
     hydration_failed: int = 0
+    hydration_fetched: int = 0
+    hydration_persisted: int = 0
+    hydration_became_ready: int = 0
+    hydration_suppressed: int = 0
+    hydration_failure_counts: dict[str, int] = field(default_factory=dict)
     ready_after_hydration: int = 0
     provider_rate_limited: bool = False
+    provider_daily_quota: bool = False
     hydration_provider_unavailable: bool = False
     hydration_timed_out: bool = False
 
