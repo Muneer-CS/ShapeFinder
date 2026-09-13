@@ -41,6 +41,11 @@ class UniverseHydrationResult:
     persisted: int
     became_ready: int
     suppressed: int
+    candidates_considered: int
+    candidates_skipped_historical_ineligible: int
+    candidates_skipped_cooldown: int
+    candidates_prioritized_partial_cache: int
+    useful_success_rate: float
     failure_counts: dict[str, int]
     provider_rate_limited: bool
     provider_daily_quota: bool
@@ -110,8 +115,19 @@ class UniverseHydrationService:
             )
         )
         eligible_missing = tuple(symbol for symbol in missing if symbol not in suppressed_symbols)
+        partial_symbols = set(
+            await self._repository.get_partial_coverage_symbols(
+                eligible_missing, interval, start, end
+            )
+        )
         limit = self._max_symbols if interval is BarInterval.ONE_DAY else self._intraday_max_symbols
-        selected = self._select_batch(eligible_missing, self._last_attempted.get(key), limit)
+        selected = self._select_batch(
+            eligible_missing,
+            self._last_attempted.get(key),
+            limit,
+            partial_symbols,
+        )
+        prioritized_partial = len(partial_symbols.intersection(selected))
         attempted = succeeded = failed = fetched = persisted = became_ready = 0
         failures: Counter[str] = Counter()
         rate_limited = daily_quota = provider_unavailable = timed_out = False
@@ -227,7 +243,9 @@ class UniverseHydrationService:
             "universe_hydration universe=%s ready_before=%s attempted=%s succeeded=%s "
             "failed=%s fetched=%s persisted=%s became_ready=%s suppressed=%s "
             "failure_counts=%s ready_after=%s rate_limited=%s daily_quota=%s "
-            "provider_unavailable=%s timed_out=%s",
+            "provider_unavailable=%s timed_out=%s candidates_considered=%s "
+            "skipped_historical_ineligible=0 skipped_cooldown=%s "
+            "prioritized_partial=%s useful_success_rate=%.3f",
             kind.value,
             len(ready_before),
             attempted,
@@ -243,6 +261,10 @@ class UniverseHydrationService:
             daily_quota,
             provider_unavailable,
             timed_out,
+            len(missing),
+            len(suppressed_symbols),
+            prioritized_partial,
+            became_ready / attempted if attempted else 0.0,
         )
         return UniverseHydrationResult(
             symbols=symbols,
@@ -256,6 +278,11 @@ class UniverseHydrationService:
             persisted=persisted,
             became_ready=became_ready,
             suppressed=len(suppressed_symbols),
+            candidates_considered=len(missing),
+            candidates_skipped_historical_ineligible=0,
+            candidates_skipped_cooldown=len(suppressed_symbols),
+            candidates_prioritized_partial_cache=prioritized_partial,
+            useful_success_rate=became_ready / attempted if attempted else 0.0,
             failure_counts=dict(sorted(failures.items())),
             provider_rate_limited=rate_limited,
             provider_daily_quota=daily_quota,
@@ -266,15 +293,16 @@ class UniverseHydrationService:
 
     @staticmethod
     def _select_batch(
-        missing: tuple[str, ...], last_attempted: str | None, limit: int
+        missing: tuple[str, ...],
+        last_attempted: str | None,
+        limit: int,
+        partial_symbols: set[str] | None = None,
     ) -> tuple[str, ...]:
         if not missing:
             return ()
-        ordered = tuple(
-            sorted(
-                missing,
-                key=lambda symbol: (hashlib.sha256(symbol.encode("ascii")).digest(), symbol),
-            )
+        partial = partial_symbols or set()
+        ordered = tuple(sorted((s for s in missing if s in partial), key=_stable_priority)) + tuple(
+            sorted((s for s in missing if s not in partial), key=_stable_priority)
         )
         if last_attempted is None or last_attempted not in ordered:
             return ordered[:limit]
@@ -331,3 +359,7 @@ class UniverseHydrationService:
             getattr(error, "provider_status", None),
             getattr(error, "provider_code", None),
         )
+
+
+def _stable_priority(symbol: str) -> tuple[bytes, str]:
+    return hashlib.sha256(symbol.encode("ascii")).digest(), symbol

@@ -347,6 +347,23 @@ class SimilaritySearchService:
                 hydration_persisted=(hydration.persisted if hydration is not None else 0),
                 hydration_became_ready=(hydration.became_ready if hydration is not None else 0),
                 hydration_suppressed=(hydration.suppressed if hydration is not None else 0),
+                candidates_considered=(
+                    hydration.candidates_considered if hydration is not None else 0
+                ),
+                candidates_skipped_historical_ineligible=(
+                    hydration.candidates_skipped_historical_ineligible
+                    if hydration is not None
+                    else 0
+                ),
+                candidates_skipped_cooldown=(
+                    hydration.candidates_skipped_cooldown if hydration is not None else 0
+                ),
+                candidates_prioritized_partial_cache=(
+                    hydration.candidates_prioritized_partial_cache if hydration is not None else 0
+                ),
+                useful_success_rate=(
+                    hydration.useful_success_rate if hydration is not None else 0.0
+                ),
                 hydration_failure_counts=(
                     hydration.failure_counts if hydration is not None else {}
                 ),

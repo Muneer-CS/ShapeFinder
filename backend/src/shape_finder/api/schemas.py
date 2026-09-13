@@ -151,6 +151,11 @@ class ScanStatisticsResponse(BaseModel):
     hydration_persisted: int
     hydration_became_ready: int
     hydration_suppressed: int
+    candidates_considered: int
+    candidates_skipped_historical_ineligible: int
+    candidates_skipped_cooldown: int
+    candidates_prioritized_partial_cache: int
+    useful_success_rate: float
     hydration_failure_counts: dict[str, int]
     ready_after_hydration: int
     provider_rate_limited: bool

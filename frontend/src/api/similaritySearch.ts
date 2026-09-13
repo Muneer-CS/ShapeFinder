@@ -71,6 +71,11 @@ export type SimilaritySearchResponse = {
     hydration_persisted: number
     hydration_became_ready: number
     hydration_suppressed: number
+    candidates_considered: number
+    candidates_skipped_historical_ineligible: number
+    candidates_skipped_cooldown: number
+    candidates_prioritized_partial_cache: number
+    useful_success_rate: number
     hydration_failure_counts: Record<string, number>
     ready_after_hydration: number
     provider_rate_limited: boolean
@@ -146,6 +151,11 @@ function isSimilaritySearchResponse(
     isNumber(statistics.hydration_persisted) &&
     isNumber(statistics.hydration_became_ready) &&
     isNumber(statistics.hydration_suppressed) &&
+    isNumber(statistics.candidates_considered) &&
+    isNumber(statistics.candidates_skipped_historical_ineligible) &&
+    isNumber(statistics.candidates_skipped_cooldown) &&
+    isNumber(statistics.candidates_prioritized_partial_cache) &&
+    isNumber(statistics.useful_success_rate) &&
     !!statistics.hydration_failure_counts &&
     typeof statistics.hydration_failure_counts === 'object' &&
     isNumber(statistics.ready_after_hydration) &&

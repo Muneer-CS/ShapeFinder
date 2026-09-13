@@ -365,26 +365,82 @@ class SQLiteMarketDataRepository:
         wanted = tuple(dict.fromkeys(symbol.upper() for symbol in symbols))
         if not wanted:
             return ()
-        found: list[str] = []
+        found: set[str] = set()
+        requested_start = start.astimezone(UTC)
+        requested_end = end.astimezone(UTC)
         with closing(self._connect()) as connection:
             for offset in range(0, len(wanted), 400):
                 batch = wanted[offset : offset + 400]
                 placeholders = ",".join("?" for _ in batch)
                 rows = connection.execute(
                     f"""
-                    SELECT symbol FROM hydration_failures
+                    SELECT symbol, start_utc, end_utc, category
+                    FROM hydration_failures
                     WHERE symbol IN ({placeholders}) AND interval = ?
-                      AND start_utc = ? AND end_utc = ? AND retry_after_utc > ?
+                      AND retry_after_utc > ?
                     """,
                     (
                         *batch,
                         interval.value,
-                        _utc_text(start),
-                        _utc_text(end),
                         _utc_text(now),
                     ),
                 ).fetchall()
-                found.extend(str(row["symbol"]) for row in rows)
+                for row in rows:
+                    category = str(row["category"])
+                    recorded_start = datetime.fromisoformat(str(row["start_utc"])).astimezone(UTC)
+                    recorded_end = datetime.fromisoformat(str(row["end_utc"])).astimezone(UTC)
+                    exact_range = (
+                        recorded_start == requested_start and recorded_end == requested_end
+                    )
+                    permanent_symbol_failure = category in {
+                        "unsupported_symbol",
+                        "provider_rejected",
+                    }
+                    overlapping_no_data = category == "no_data" and _substantially_overlaps(
+                        requested_start,
+                        requested_end,
+                        recorded_start,
+                        recorded_end,
+                    )
+                    if exact_range or permanent_symbol_failure or overlapping_no_data:
+                        found.add(str(row["symbol"]))
+        return tuple(sorted(found))
+
+    async def get_partial_coverage_symbols(
+        self,
+        symbols: Sequence[str],
+        interval: BarInterval,
+        start: datetime,
+        end: datetime,
+    ) -> Sequence[str]:
+        return await asyncio.to_thread(
+            self._get_partial_coverage_symbols_sync, symbols, interval, start, end
+        )
+
+    def _get_partial_coverage_symbols_sync(
+        self,
+        symbols: Sequence[str],
+        interval: BarInterval,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[str, ...]:
+        wanted = tuple(dict.fromkeys(symbol.upper() for symbol in symbols))
+        if not wanted:
+            return ()
+        found: set[str] = set()
+        with closing(self._connect()) as connection:
+            for offset in range(0, len(wanted), 400):
+                batch = wanted[offset : offset + 400]
+                placeholders = ",".join("?" for _ in batch)
+                rows = connection.execute(
+                    f"""
+                    SELECT DISTINCT symbol FROM market_data_coverage
+                    WHERE symbol IN ({placeholders}) AND interval = ?
+                      AND end_utc >= ? AND start_utc <= ?
+                    """,
+                    (*batch, interval.value, _utc_text(start), _utc_text(end)),
+                ).fetchall()
+                found.update(str(row["symbol"]) for row in rows)
         return tuple(sorted(found))
 
     async def record_hydration_failure(self, record: HydrationFailureRecord) -> None:
@@ -511,3 +567,16 @@ def _coverage_contains(
         if range_end_at > cursor:
             cursor = range_end_at
     return False
+
+
+def _substantially_overlaps(
+    first_start: datetime,
+    first_end: datetime,
+    second_start: datetime,
+    second_end: datetime,
+) -> bool:
+    overlap = min(first_end, second_end) - max(first_start, second_start)
+    if overlap <= timedelta(0):
+        return False
+    shorter = min(first_end - first_start, second_end - second_start)
+    return shorter > timedelta(0) and overlap / shorter >= 0.5

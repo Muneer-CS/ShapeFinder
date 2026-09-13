@@ -65,6 +65,11 @@ class ScanStatistics:
     hydration_persisted: int = 0
     hydration_became_ready: int = 0
     hydration_suppressed: int = 0
+    candidates_considered: int = 0
+    candidates_skipped_historical_ineligible: int = 0
+    candidates_skipped_cooldown: int = 0
+    candidates_prioritized_partial_cache: int = 0
+    useful_success_rate: float = 0.0
     hydration_failure_counts: dict[str, int] = field(default_factory=dict)
     ready_after_hydration: int = 0
     provider_rate_limited: bool = False

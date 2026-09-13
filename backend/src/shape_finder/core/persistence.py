@@ -61,6 +61,14 @@ class MarketDataRepository(Protocol):
         now: datetime,
     ) -> Sequence[str]: ...
 
+    async def get_partial_coverage_symbols(
+        self,
+        symbols: Sequence[str],
+        interval: BarInterval,
+        start: datetime,
+        end: datetime,
+    ) -> Sequence[str]: ...
+
     async def record_hydration_failure(self, record: HydrationFailureRecord) -> None: ...
 
     async def clear_hydration_failure(

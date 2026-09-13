@@ -22,7 +22,7 @@ from shape_finder.core.errors import (
     RateLimitError,
 )
 from shape_finder.core.market_data import BarInterval, PriceBar, TimeSeries
-from shape_finder.core.persistence import CoverageRange
+from shape_finder.core.persistence import CoverageRange, HydrationFailureRecord
 from shape_finder.core.similarity_search import SimilaritySearchQuery
 from shape_finder.core.universe import SymbolMetadata, UniverseKind, UniverseSelection
 from shape_finder.infrastructure.persistence.sqlite_market_data import SQLiteMarketDataRepository
@@ -261,6 +261,73 @@ async def test_fetch_success_with_insufficient_bars_is_classified_separately(
 
 
 @pytest.mark.anyio
+async def test_partial_cache_is_prioritized_over_uncached_symbol(tmp_path: Path) -> None:
+    provider = HydrationProvider(
+        [metadata("AAA"), metadata("BBB")],
+        {"AAA": series("AAA"), "BBB": series("BBB")},
+    )
+    repository, _, _, hydration = await services(tmp_path, provider, max_symbols=1)
+    partial = series("BBB", count=5)
+    await repository.upsert_time_series(
+        [partial],
+        [CoverageRange(START, START + timedelta(days=4), NOW)],
+        source="partial",
+    )
+
+    result = await hydration.hydrate(UniverseKind.NASDAQ, START, END, BarInterval.ONE_DAY, 9)
+
+    assert provider.calls[0][0] == "BBB"
+    assert result.candidates_prioritized_partial_cache == 1
+    assert result.became_ready == 1
+
+
+@pytest.mark.anyio
+async def test_no_data_cooldown_applies_to_overlap_but_not_unrelated_later_range(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteMarketDataRepository(tmp_path / "range-aware.sqlite3")
+    await repository.initialize()
+    await repository.record_hydration_failure(
+        HydrationFailureRecord(
+            symbol="AAA",
+            interval=BarInterval.ONE_DAY,
+            start=START,
+            end=END,
+            category="no_data",
+            failed_at=NOW,
+            retry_after=NOW + timedelta(days=7),
+        )
+    )
+
+    overlapping = await repository.get_suppressed_hydration_symbols(
+        ("AAA",),
+        BarInterval.ONE_DAY,
+        START + timedelta(days=2),
+        END + timedelta(days=2),
+        NOW,
+    )
+    later_start = START + timedelta(days=365 * 6)
+    unrelated = await repository.get_suppressed_hydration_symbols(
+        ("AAA",),
+        BarInterval.ONE_DAY,
+        later_start,
+        later_start + timedelta(days=20),
+        NOW,
+    )
+
+    assert overlapping == ("AAA",)
+    assert unrelated == ()
+
+
+def test_deterministic_selection_is_distributed_not_alphabetical() -> None:
+    symbols = ("AAA", "BBB", "CCC", "DDD")
+    first = UniverseHydrationService._select_batch(symbols, None, 2)
+    second = UniverseHydrationService._select_batch(symbols, None, 2)
+    assert first == second
+    assert first != ("AAA", "BBB")
+
+
+@pytest.mark.anyio
 async def test_daily_quota_stops_batch_with_distinct_status(tmp_path: Path) -> None:
     provider = HydrationProvider(
         [metadata("AAA"), metadata("BBB")],
@@ -316,6 +383,10 @@ async def test_search_scans_newly_hydrated_symbols_and_reports_exact_metadata(
     assert statistics.hydration_fetched == 2
     assert statistics.hydration_persisted == 2
     assert statistics.hydration_became_ready == 2
+    assert statistics.candidates_considered == 3
+    assert statistics.candidates_skipped_historical_ineligible == 0
+    assert statistics.candidates_skipped_cooldown == 0
+    assert statistics.useful_success_rate == 1.0
     assert statistics.hydration_failure_counts == {}
     assert statistics.ready_after_hydration == statistics.symbols_eligible == 2
     assert statistics.symbols_scanned == 2
