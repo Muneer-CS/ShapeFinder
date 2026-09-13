@@ -134,6 +134,7 @@ async def test_universe_normalizes_filters_deduplicates_and_selects_exchange(
             metadata("SPY", security_type="ETF"),
             metadata("RY", country="Canada"),
             metadata("OLD", active=False),
+            metadata("!OTC/FLZH", "NASDAQ"),
         ]
     )
     service = UniverseService(provider, repository, clock=lambda: NOW)

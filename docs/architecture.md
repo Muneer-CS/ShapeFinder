@@ -41,7 +41,7 @@ request → SimilaritySearchService → batched readiness query → cached TimeS
                                       HistoricalSimilarityScanner
 ```
 
-The initial named universes are `us_equities`, `nasdaq`, and `nyse`; `custom` preserves the Phase 7 symbol-list contract. Membership is limited to active U.S. `Common Stock` records. Exact exchange equality defines NASDAQ and NYSE subsets. Index membership such as S&P 500 is deferred until an authoritative maintainable source is available.
+The initial named universes are `us_equities`, `nasdaq`, and `nyse`; `custom` preserves the Phase 7 symbol-list contract. Membership is limited to active U.S. `Common Stock` records whose ticker matches ShapeFinder's supported letter-first, alphanumeric/dot/hyphen symbol contract. Exact exchange equality defines NASDAQ and NYSE subsets. Index membership such as S&P 500 is deferred until an authoritative maintainable source is available.
 
 Migration 2 adds normalized `universe_symbols` and `universe_refresh` tables. A refresh is a single transaction that replaces the last successful snapshot; failed refreshes cannot partially change membership. The default 24-hour TTL is configurable. Fresh cache avoids a provider call. Stale cache is served with `universe_stale=true` when provider refresh fails.
 

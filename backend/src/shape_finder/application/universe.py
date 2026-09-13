@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
@@ -18,6 +19,7 @@ UNIVERSE_NAMES = {
     UniverseKind.NYSE: "NYSE",
 }
 _US_COUNTRIES = {"US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"}
+_SUPPORTED_SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
 logger = logging.getLogger("shape_finder.universe")
 
 
@@ -100,7 +102,7 @@ def _normalize_catalog(symbols: Sequence[SymbolMetadata]) -> tuple[SymbolMetadat
         country = item.country.strip()
         security_type = item.security_type.strip()
         if (
-            not symbol
+            not _SUPPORTED_SYMBOL_PATTERN.fullmatch(symbol)
             or country.upper() not in _US_COUNTRIES
             or security_type.casefold() != "common stock"
             or not item.active
@@ -124,10 +126,11 @@ def _normalize_catalog(symbols: Sequence[SymbolMetadata]) -> tuple[SymbolMetadat
 
 
 def _select(symbols: Sequence[SymbolMetadata], kind: UniverseKind) -> tuple[SymbolMetadata, ...]:
+    supported = tuple(item for item in symbols if _SUPPORTED_SYMBOL_PATTERN.fullmatch(item.symbol))
     if kind is UniverseKind.US_EQUITIES:
-        return tuple(symbols)
+        return supported
     exchange = "NASDAQ" if kind is UniverseKind.NASDAQ else "NYSE"
-    return tuple(item for item in symbols if item.exchange == exchange)
+    return tuple(item for item in supported if item.exchange == exchange)
 
 
 def _exchange_priority(exchange: str) -> tuple[int, str]:
