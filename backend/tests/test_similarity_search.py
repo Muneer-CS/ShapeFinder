@@ -107,6 +107,67 @@ def test_no_strong_match_and_minimum_filter() -> None:
     assert result.statistics.windows_passing_threshold == 0
 
 
+def test_omitted_and_zero_minimum_similarity_are_equivalent() -> None:
+    reference = make_series("NVDA", REFERENCE_CLOSES)
+    candidate = make_series("AMD", [70, 75, 72, *REFERENCE_CLOSES, 90, 88, 91])
+
+    omitted = scanner().scan(reference, [candidate], query("AMD", top_n=20))
+    zero = scanner().scan(
+        reference,
+        [candidate],
+        query("AMD", top_n=20, minimum_similarity=0),
+    )
+
+    assert zero == omitted
+
+
+@pytest.mark.parametrize("threshold", [70, 80, 82.5, 90, 100])
+def test_minimum_similarity_is_an_inclusive_result_filter(threshold: float) -> None:
+    reference = make_series("NVDA", REFERENCE_CLOSES)
+    candidate = make_series(
+        "AMD",
+        [70, 75, 72, *REFERENCE_CLOSES, 80, 70, 90, *reversed(REFERENCE_CLOSES)],
+    )
+    baseline = scanner().scan(reference, [candidate], query("AMD", top_n=100))
+    filtered = scanner().scan(
+        reference,
+        [candidate],
+        query("AMD", top_n=100, minimum_similarity=threshold),
+    )
+
+    expected = tuple(match for match in baseline.matches if match.score.overall_score >= threshold)
+    assert filtered.matches == expected
+    assert all(match.score.overall_score >= threshold for match in filtered.matches)
+    assert filtered.statistics.windows_evaluated == baseline.statistics.windows_evaluated
+    if threshold == 100:
+        assert filtered.matches
+        assert all(match.score.overall_score == 100 for match in filtered.matches)
+
+
+def test_threshold_filters_before_final_top_n_without_changing_scores() -> None:
+    reference = make_series("NVDA", REFERENCE_CLOSES)
+    candidates = [
+        make_series("AMD", [60, 65, *REFERENCE_CLOSES, 71, 73, *REFERENCE_CLOSES]),
+        make_series("AAPL", [55, 61, *[value * 2 for value in REFERENCE_CLOSES]]),
+    ]
+    all_qualifying = scanner().scan(
+        reference,
+        candidates,
+        query("AMD", "AAPL", top_n=100, minimum_similarity=82.5),
+    )
+    limited = scanner().scan(
+        reference,
+        candidates,
+        query("AMD", "AAPL", top_n=2, minimum_similarity=82.5),
+    )
+
+    assert limited.matches == all_qualifying.matches[:2]
+    assert [match.score for match in limited.matches] == [
+        match.score for match in all_qualifying.matches[:2]
+    ]
+    assert limited.statistics.windows_evaluated == all_qualifying.statistics.windows_evaluated
+
+
 def test_top_n_overlap_suppression_and_distinct_matches() -> None:
     history = [*REFERENCE_CLOSES, 70, 65, 60, *[value * 2 for value in REFERENCE_CLOSES]]
     candidate = make_series("AMD", history)

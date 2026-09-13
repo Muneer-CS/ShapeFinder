@@ -224,6 +224,9 @@ h1 {
   font-size: 0.75rem;
   line-height: 1.4;
 }
+.field .field-error {
+  color: #ffaaa0;
+}
 .field input:focus,
 .field select:focus,
 .ticker-chips:focus-within {

@@ -39,12 +39,18 @@ type ReferenceState =
   | { kind: 'error'; message: string }
 type SearchState =
   | { kind: 'idle' | 'loading' }
-  | { kind: 'success'; data: SimilaritySearchResponse }
+  | {
+      kind: 'success'
+      data: SimilaritySearchResponse
+      minimumSimilarity: number | null
+    }
   | { kind: 'error'; message: string }
 type PreviewState =
   | { kind: 'loading' }
   | { kind: 'success'; data: TimeSeriesResponse }
   | { kind: 'error' }
+type MinimumSimilarityPreset =
+  'any' | '70' | '75' | '80' | '85' | '90' | 'custom'
 
 const ChartVisuals = lazy(() => import('./ChartVisuals'))
 
@@ -93,6 +99,15 @@ const safeMessage = (error: unknown) => {
 }
 const previewKey = (match: SimilarityMatch) =>
   `${match.symbol}|${match.start}|${match.end}|${match.interval}`
+const customMinimumError = (value: string) => {
+  if (!value.trim()) return 'Enter a minimum similarity from 0 to 100.'
+  const minimum = Number(value)
+  if (!Number.isFinite(minimum) || minimum < 0 || minimum > 100)
+    return 'Minimum similarity must be between 0 and 100.'
+  return ''
+}
+const displayThreshold = (value: number) =>
+  value.toLocaleString(undefined, { maximumFractionDigits: 6 })
 
 function initialDates() {
   const today = new Date()
@@ -135,7 +150,9 @@ function App() {
   const [candidateInput, setCandidateInput] = useState('')
   const [candidateMessage, setCandidateMessage] = useState('')
   const [topN, setTopN] = useState(10)
-  const [minimumSimilarity, setMinimumSimilarity] = useState('')
+  const [minimumSimilarityPreset, setMinimumSimilarityPreset] =
+    useState<MinimumSimilarityPreset>('any')
+  const [customMinimumSimilarity, setCustomMinimumSimilarity] = useState('')
   const [searchError, setSearchError] = useState('')
   const [search, setSearch] = useState<SearchState>({ kind: 'idle' })
   const [selectedMatch, setSelectedMatch] = useState<SimilarityMatch | null>(
@@ -318,7 +335,12 @@ function App() {
       return setSearchError('Search start must be earlier than search end.')
     if (searchScope === 'custom' && !candidateSymbols.length)
       return setSearchError('Add at least one stock to search.')
-    const minimum = minimumSimilarity === '' ? null : Number(minimumSimilarity)
+    const minimum =
+      minimumSimilarityPreset === 'any'
+        ? null
+        : minimumSimilarityPreset === 'custom'
+          ? Number(customMinimumSimilarity)
+          : Number(minimumSimilarityPreset)
     if (
       minimum !== null &&
       (!Number.isFinite(minimum) || minimum < 0 || minimum > 100)
@@ -359,7 +381,7 @@ function App() {
         controller.signal,
       )
       if (searchController.current !== controller) return
-      setSearch({ kind: 'success', data })
+      setSearch({ kind: 'success', data, minimumSimilarity: minimum })
     } catch (error: unknown) {
       if (searchController.current !== controller) return
       if (error instanceof Error && error.name === 'AbortError') return
@@ -568,24 +590,62 @@ function App() {
             </select>
           </div>
           <div className="field threshold-field">
-            <label htmlFor="minimum-similarity">
-              Minimum similarity <span>optional</span>
-            </label>
-            <input
+            <label htmlFor="minimum-similarity">Minimum similarity</label>
+            <select
               id="minimum-similarity"
-              type="number"
-              min="0"
-              max="100"
-              step="0.1"
-              value={minimumSimilarity}
+              value={minimumSimilarityPreset}
               onChange={(event) =>
-                updateSearch(() => setMinimumSimilarity(event.target.value))
+                updateSearch(() =>
+                  setMinimumSimilarityPreset(
+                    event.target.value as MinimumSimilarityPreset,
+                  ),
+                )
               }
-              placeholder="e.g. 80"
-            />
-            <small>
-              Only show engineered similarity scores at or above this value.
-            </small>
+            >
+              <option value="any">Any similarity</option>
+              <option value="70">70%+</option>
+              <option value="75">75%+</option>
+              <option value="80">80%+</option>
+              <option value="85">85%+</option>
+              <option value="90">90%+</option>
+              <option value="custom">Custom</option>
+            </select>
+            <small>Only show matches at or above this score.</small>
+            {minimumSimilarityPreset === 'custom' && (
+              <>
+                <label htmlFor="custom-minimum-similarity">
+                  Custom minimum similarity
+                </label>
+                <input
+                  id="custom-minimum-similarity"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  inputMode="decimal"
+                  value={customMinimumSimilarity}
+                  onChange={(event) =>
+                    updateSearch(() =>
+                      setCustomMinimumSimilarity(event.target.value),
+                    )
+                  }
+                  placeholder="e.g. 82.5"
+                  aria-invalid={Boolean(
+                    customMinimumError(customMinimumSimilarity),
+                  )}
+                  aria-describedby="custom-minimum-similarity-error"
+                />
+                {customMinimumError(customMinimumSimilarity) && (
+                  <small
+                    className="field-error"
+                    id="custom-minimum-similarity-error"
+                    role="alert"
+                  >
+                    {customMinimumError(customMinimumSimilarity)}
+                  </small>
+                )}
+              </>
+            )}
           </div>
           <fieldset className="scope-field">
             <legend>Search stocks</legend>
@@ -692,7 +752,10 @@ function App() {
             <button
               type="submit"
               disabled={
-                search.kind === 'loading' || reference.kind !== 'success'
+                search.kind === 'loading' ||
+                reference.kind !== 'success' ||
+                (minimumSimilarityPreset === 'custom' &&
+                  Boolean(customMinimumError(customMinimumSimilarity)))
               }
             >
               {search.kind === 'loading'
@@ -875,7 +938,10 @@ function SearchResults({
                   ? state.data.statistics.hydration_attempted > 0
                     ? 'No stocks became scan-ready in this bounded attempt. Try again later to continue expanding coverage.'
                     : 'No stocks in this universe have complete cached history for the selected interval and period.'
-                  : 'No matches met your selected similarity threshold.'}
+                  : state.minimumSimilarity !== null &&
+                      state.minimumSimilarity > 0
+                    ? `No matches reached your ${displayThreshold(state.minimumSimilarity)}% minimum similarity.`
+                    : 'No matching periods were found for this search.'}
               </p>
             </div>
           ) : (

@@ -358,11 +358,14 @@ describe('similarity search workflow', () => {
     expect(screen.getByLabelText('Stocks to search')).toBeInTheDocument()
   })
 
-  it('posts a named universe without custom symbols', async () => {
+  it('posts a named universe with its minimum similarity and no custom symbols', async () => {
     const fetchMock = mockApi()
     render(<App />)
     await loadReference()
     fireEvent.click(screen.getByRole('radio', { name: /NASDAQ/ }))
+    fireEvent.change(screen.getByLabelText('Minimum similarity'), {
+      target: { value: '80' },
+    })
     await runSearch()
     const calls = fetchMock.mock.calls as unknown as Array<
       [RequestInfo | URL, RequestInit?]
@@ -372,9 +375,11 @@ describe('similarity search workflow', () => {
     )
     const body = JSON.parse(String(call?.[1]?.body)) as {
       search: Record<string, unknown>
+      minimum_similarity: number
     }
     expect(body.search).toMatchObject({ universe: { kind: 'nasdaq' } })
     expect(body.search).not.toHaveProperty('symbols')
+    expect(body.minimum_similarity).toBe(80)
   })
 
   it('makes partial broad-scan coverage prominent and handles zero eligibility', async () => {
@@ -536,11 +541,16 @@ describe('similarity search workflow', () => {
     const ticker = screen.getByLabelText('Stocks to search')
     fireEvent.change(ticker, { target: { value: 'AMD' } })
     fireEvent.keyDown(ticker, { key: 'Enter' })
-    fireEvent.change(screen.getByLabelText(/Minimum similarity/), {
+    fireEvent.change(screen.getByLabelText('Minimum similarity'), {
+      target: { value: 'custom' },
+    })
+    fireEvent.change(screen.getByLabelText('Custom minimum similarity'), {
       target: { value: '101' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Find Similar Charts' }))
     expect(screen.getByRole('alert')).toHaveTextContent('between 0 and 100')
+    expect(
+      screen.getByRole('button', { name: 'Find Similar Charts' }),
+    ).toBeDisabled()
   })
 
   it('supports the top-N control and posts the exact backend contract', async () => {
@@ -550,7 +560,7 @@ describe('similarity search workflow', () => {
     fireEvent.change(screen.getByLabelText('Number of results'), {
       target: { value: '5' },
     })
-    fireEvent.change(screen.getByLabelText(/Minimum similarity/), {
+    fireEvent.change(screen.getByLabelText('Minimum similarity'), {
       target: { value: '80' },
     })
     await runSearch()
@@ -577,6 +587,100 @@ describe('similarity search workflow', () => {
       top_n: 5,
       minimum_similarity: 80,
     })
+  })
+
+  it('offers Any and every minimum-similarity preset', () => {
+    mockApi()
+    render(<App />)
+    const control = screen.getByLabelText('Minimum similarity')
+    expect(
+      within(control).getByRole('option', { name: 'Any similarity' }),
+    ).toBeInTheDocument()
+    for (const value of ['70%+', '75%+', '80%+', '85%+', '90%+', 'Custom'])
+      expect(
+        within(control).getByRole('option', { name: value }),
+      ).toBeInTheDocument()
+  })
+
+  it('sends Any as null and every preset as its inclusive score', async () => {
+    const fetchMock = mockApi()
+    render(<App />)
+    await loadReference()
+    const control = screen.getByLabelText('Minimum similarity')
+    for (const [selection, expected] of [
+      ['any', null],
+      ['70', 70],
+      ['75', 75],
+      ['80', 80],
+      ['85', 85],
+      ['90', 90],
+    ] as const) {
+      fireEvent.change(control, { target: { value: selection } })
+      await runSearch()
+      const calls = fetchMock.mock.calls as unknown as Array<
+        [RequestInfo | URL, RequestInit?]
+      >
+      const call = calls
+        .filter(([url]) => String(url).includes('/similarity/search'))
+        .at(-1)
+      const body = JSON.parse(String(call?.[1]?.body)) as {
+        minimum_similarity: number | null
+      }
+      expect(body.minimum_similarity).toBe(expected)
+    }
+  })
+
+  it('accepts a custom decimal and blocks empty, negative, and excessive values', async () => {
+    const fetchMock = mockApi()
+    render(<App />)
+    await loadReference()
+    fireEvent.change(screen.getByLabelText('Minimum similarity'), {
+      target: { value: 'custom' },
+    })
+    const input = screen.getByLabelText('Custom minimum similarity')
+    const button = screen.getByRole('button', { name: 'Find Similar Charts' })
+    expect(input).toBeInTheDocument()
+    expect(button).toBeDisabled()
+
+    fireEvent.change(input, { target: { value: 'not-a-number' } })
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter a minimum')
+    expect(button).toBeDisabled()
+
+    for (const invalid of ['-0.1', '100.1']) {
+      fireEvent.change(input, { target: { value: invalid } })
+      expect(screen.getByRole('alert')).toHaveTextContent('between 0 and 100')
+      expect(button).toBeDisabled()
+    }
+
+    fireEvent.change(input, { target: { value: '82.5' } })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(button).toBeEnabled()
+    await runSearch()
+    const calls = fetchMock.mock.calls as unknown as Array<
+      [RequestInfo | URL, RequestInit?]
+    >
+    const call = calls
+      .filter(([url]) => String(url).includes('/similarity/search'))
+      .at(-1)
+    const body = JSON.parse(String(call?.[1]?.body)) as {
+      minimum_similarity: number
+    }
+    expect(body.minimum_similarity).toBe(82.5)
+  })
+
+  it('explains an empty threshold result without implying search failure', async () => {
+    mockApi({ search: response(searchSuccess([])) })
+    render(<App />)
+    await loadReference()
+    fireEvent.change(screen.getByLabelText('Minimum similarity'), {
+      target: { value: '90' },
+    })
+    await runSearch()
+    expect(
+      screen.getByText('No matches reached your 90% minimum similarity.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/3 stocks scanned/)).toBeInTheDocument()
+    expect(screen.queryByText('Search unavailable')).not.toBeInTheDocument()
   })
 
   it('disables duplicate submission and exposes a search loading status', async () => {
@@ -637,7 +741,7 @@ describe('similarity search workflow', () => {
     await loadReference()
     await runSearch()
     expect(
-      screen.getByText('No matches met your selected similarity threshold.'),
+      screen.getByText('No matching periods were found for this search.'),
     ).toBeInTheDocument()
   })
 

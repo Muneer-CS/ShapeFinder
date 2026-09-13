@@ -135,7 +135,7 @@ V1 assumes observations are ordered and reasonably cover comparable start-to-end
 - The default stride is one valid bar. For `L` reference bars and `N` candidate bars, offsets `0` through `N − L` are evaluated, including the final possible window.
 - Reference and candidate intervals must match exactly.
 - Ranking is deterministic: overall score descending, candidate start ascending, symbol ascending, then candidate end ascending.
-- `minimum_similarity`, when present, removes scores below its inclusive 0–100 threshold before selection. `top_n` returns at most 1–100 matches.
+- `minimum_similarity` is an inclusive 0–100 result filter. Omitted/`null` and `0` both preserve the original unfiltered behavior. Each window receives its ordinary six-decimal V1 score first; scores below the threshold are then discarded before overlap selection and final top-N trimming. This placement cannot change a surviving score or its relative rank, and qualifying results are never hidden by prematurely trimming an unfiltered top-N list. `top_n` returns at most 1–100 matches.
 - After ranking, a lower-ranked window is suppressed when it shares **more than 50%** of its bar timestamps with an already selected window for the same symbol. Equal-score duplicates therefore collapse to one representative event; separate events and matches from different symbols remain eligible.
 - For the reference symbol itself, a candidate is excluded before scoring when it shares more than 50% of its timestamps with the loaded reference. This removes the exact reference and nearby trivial shifts while preserving distinct history elsewhere in the same stock.
 
