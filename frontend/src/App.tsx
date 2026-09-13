@@ -720,7 +720,7 @@ function App() {
       )}
 
       <footer>
-        <span>ShapeFinder 0.1.0</span>
+        <span>ShapeFinder 0.2.0-dev</span>
         <span>Engineered chart-shape similarity · No predictions</span>
       </footer>
     </main>

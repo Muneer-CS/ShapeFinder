@@ -12,7 +12,7 @@ def test_health_endpoint() -> None:
     assert response.json() == {
         "status": "ok",
         "service": "shape-finder-api",
-        "version": "0.1.0",
+        "version": "0.2.0-dev",
     }
 
 
@@ -22,4 +22,4 @@ def test_openapi_exposes_health_endpoint() -> None:
     assert response.status_code == 200
     assert "/api/v1/health" in response.json()["paths"]
     assert "/api/v1/readiness" in response.json()["paths"]
-    assert response.json()["info"]["version"] == "0.1.0"
+    assert response.json()["info"]["version"] == "0.2.0-dev"
