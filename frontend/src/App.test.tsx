@@ -79,6 +79,15 @@ const searchSuccess = (items = matches) => ({
     symbols_skipped: 0,
     symbols_failed: 0,
     universe_stale: false,
+    ready_before_hydration: 0,
+    hydration_limit: 0,
+    hydration_attempted: 0,
+    hydration_succeeded: 0,
+    hydration_failed: 0,
+    ready_after_hydration: 3,
+    provider_rate_limited: false,
+    hydration_provider_unavailable: false,
+    hydration_timed_out: false,
   },
 })
 
@@ -367,6 +376,11 @@ describe('similarity search workflow', () => {
       symbols_eligible: 812,
       symbols_scanned: 812,
       symbols_skipped: 3109,
+      ready_before_hydration: 807,
+      hydration_limit: 5,
+      hydration_attempted: 5,
+      hydration_succeeded: 5,
+      ready_after_hydration: 812,
     }
     mockApi({ search: response(partial) })
     render(<App />)
@@ -377,8 +391,45 @@ describe('similarity search workflow', () => {
       screen.getByText(/Scanned 812 of 3,921 known stocks/),
     ).toBeInTheDocument()
     expect(
-      screen.getByText(/3,109 lacked complete cached history/),
+      screen.getByText(/5 additional stocks were added to the search cache/),
     ).toBeInTheDocument()
+    expect(
+      screen.getByText(/3,109 still lacked complete cached history/),
+    ).toBeInTheDocument()
+  })
+
+  it('explains partial hydration when the provider rate limit stops expansion', async () => {
+    const partial = searchSuccess([])
+    partial.statistics = {
+      ...partial.statistics,
+      universe_id: 'nasdaq',
+      universe_symbols_total: 1800,
+      symbols_requested: 1800,
+      symbols_eligible: 4,
+      symbols_scanned: 4,
+      symbols_skipped: 1796,
+      ready_before_hydration: 3,
+      hydration_limit: 5,
+      hydration_attempted: 2,
+      hydration_succeeded: 1,
+      hydration_failed: 1,
+      ready_after_hydration: 4,
+      provider_rate_limited: true,
+    }
+    mockApi({ search: response(partial) })
+    render(<App />)
+    await loadReference()
+    fireEvent.click(screen.getByRole('radio', { name: /NASDAQ/ }))
+    await runSearch()
+    expect(
+      screen.getByText(/1 additional stock was added to the search cache/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /Additional market history could not be loaded right now/,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/TWELVE_DATA_API_KEY/)).not.toBeInTheDocument()
   })
 
   it('shows a clear state when a universe has no scan-ready stocks', async () => {
@@ -391,6 +442,9 @@ describe('similarity search workflow', () => {
       symbols_eligible: 0,
       symbols_scanned: 0,
       symbols_skipped: 1400,
+      hydration_limit: 5,
+      hydration_attempted: 5,
+      hydration_failed: 5,
     }
     mockApi({ search: response(empty) })
     render(<App />)
@@ -400,7 +454,9 @@ describe('similarity search workflow', () => {
     expect(
       screen.getByRole('heading', { name: 'No scan-ready stocks' }),
     ).toBeInTheDocument()
-    expect(screen.getAllByText(/complete cached history/)).toHaveLength(2)
+    expect(
+      screen.getByText(/No stocks became scan-ready in this bounded attempt/),
+    ).toBeInTheDocument()
   })
 
   it('explains universe metadata failure while preserving custom search', async () => {

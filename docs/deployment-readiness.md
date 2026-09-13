@@ -61,6 +61,9 @@ The current SQLite repository, refresh locks, and scan admission controls are pr
 | `MARKET_DATA_TIMEOUT_SECONDS` | Provider request timeout; default `10`. |
 | `DATABASE_PATH` | Absolute path on a persistent volume, for example `/var/lib/shapefinder/shapefinder.sqlite3`. |
 | `UNIVERSE_TTL_HOURS` | Universe metadata cache TTL; default `24`. |
+| `UNIVERSE_HYDRATION_MAX_SYMBOLS` | Maximum daily symbols hydrated by one named-universe search; default `5`, hard maximum `25`. |
+| `UNIVERSE_HYDRATION_INTRADAY_MAX_SYMBOLS` | More conservative intraday batch maximum; default `2`, hard maximum `10` and capped by the daily value. |
+| `UNIVERSE_HYDRATION_TIMEOUT_SECONDS` | Per-request hydration time budget before scanning cached/ready symbols; default `15`. |
 | `SCAN_TIMEOUT_SECONDS` | Request response deadline for scans; default `60`. |
 | `MAX_CONCURRENT_SCANS` | Per-process scan admission cap; default `2`. |
 | `MAX_REQUEST_BODY_BYTES` | Request-body cap; default `65536`. |
@@ -78,7 +81,7 @@ Database loss does not silently change the similarity formula or corrupt source 
 
 - discard all cached OHLCV and universe metadata;
 - increase startup/user latency and Twelve Data quota consumption;
-- make named-universe scans report zero scan-ready symbols until histories are repopulated;
+- reset named-universe scan coverage until request-driven bounded hydration repopulates histories;
 - remove the application's main protection against repeated provider requests.
 
 Back up the persistent database according to the chosen platform's volume policy. Do not share one SQLite file across network filesystems or multiple replicas without validating locking semantics.

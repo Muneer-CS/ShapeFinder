@@ -142,6 +142,15 @@ class ScanStatisticsResponse(BaseModel):
     symbols_skipped: int
     symbols_failed: int
     universe_stale: bool
+    ready_before_hydration: int
+    hydration_limit: int
+    hydration_attempted: int
+    hydration_succeeded: int
+    hydration_failed: int
+    ready_after_hydration: int
+    provider_rate_limited: bool
+    hydration_provider_unavailable: bool
+    hydration_timed_out: bool
 
 
 class SimilaritySearchResponse(BaseModel):

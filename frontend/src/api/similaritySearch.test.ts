@@ -44,6 +44,15 @@ const success = {
     symbols_skipped: 0,
     symbols_failed: 0,
     universe_stale: false,
+    ready_before_hydration: 0,
+    hydration_limit: 0,
+    hydration_attempted: 0,
+    hydration_succeeded: 0,
+    hydration_failed: 0,
+    ready_after_hydration: 1,
+    provider_rate_limited: false,
+    hydration_provider_unavailable: false,
+    hydration_timed_out: false,
   },
 }
 

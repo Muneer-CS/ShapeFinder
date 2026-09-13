@@ -56,6 +56,15 @@ class ScanStatistics:
     symbols_skipped: int = 0
     symbols_failed: int = 0
     universe_stale: bool = False
+    ready_before_hydration: int = 0
+    hydration_limit: int = 0
+    hydration_attempted: int = 0
+    hydration_succeeded: int = 0
+    hydration_failed: int = 0
+    ready_after_hydration: int = 0
+    provider_rate_limited: bool = False
+    hydration_provider_unavailable: bool = False
+    hydration_timed_out: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -62,6 +62,15 @@ export type SimilaritySearchResponse = {
     symbols_skipped: number
     symbols_failed: number
     universe_stale: boolean
+    ready_before_hydration: number
+    hydration_limit: number
+    hydration_attempted: number
+    hydration_succeeded: number
+    hydration_failed: number
+    ready_after_hydration: number
+    provider_rate_limited: boolean
+    hydration_provider_unavailable: boolean
+    hydration_timed_out: boolean
   }
 }
 
@@ -121,7 +130,16 @@ function isSimilaritySearchResponse(
     isNumber(statistics.symbols_eligible) &&
     isNumber(statistics.symbols_skipped) &&
     isNumber(statistics.symbols_failed) &&
-    typeof statistics.universe_stale === 'boolean'
+    typeof statistics.universe_stale === 'boolean' &&
+    isNumber(statistics.ready_before_hydration) &&
+    isNumber(statistics.hydration_limit) &&
+    isNumber(statistics.hydration_attempted) &&
+    isNumber(statistics.hydration_succeeded) &&
+    isNumber(statistics.hydration_failed) &&
+    isNumber(statistics.ready_after_hydration) &&
+    typeof statistics.provider_rate_limited === 'boolean' &&
+    typeof statistics.hydration_provider_unavailable === 'boolean' &&
+    typeof statistics.hydration_timed_out === 'boolean'
   )
 }
 

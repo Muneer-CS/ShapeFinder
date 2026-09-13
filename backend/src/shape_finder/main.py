@@ -22,6 +22,7 @@ from shape_finder.application.similarity_search import (
     SimilaritySearchService,
 )
 from shape_finder.application.universe import UniverseService
+from shape_finder.application.universe_hydration import UniverseHydrationService
 from shape_finder.config import Settings, get_settings
 from shape_finder.core.market_data import MarketDataProvider
 from shape_finder.core.persistence import MarketDataRepository
@@ -54,11 +55,20 @@ def create_app(
             )
             application.state.market_data_service = market_data
             application.state.universe_service = universe_service
+            hydration_service = UniverseHydrationService(
+                market_data,
+                active_repository,
+                universe_service,
+                max_symbols=active_settings.universe_hydration_max_symbols,
+                intraday_max_symbols=active_settings.universe_hydration_intraday_max_symbols,
+                timeout_seconds=active_settings.universe_hydration_timeout_seconds,
+            )
             application.state.similarity_search_service = SimilaritySearchService(
                 market_data,
                 HistoricalSimilarityScanner(ChartSimilarityEngine()),
                 active_repository,
                 universe_service,
+                hydration_service,
             )
 
         if provider is not None:

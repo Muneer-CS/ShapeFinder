@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     twelve_data_base_url: str = "https://api.twelvedata.com"
     market_data_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     universe_ttl_hours: int = Field(default=24, ge=1, le=720)
+    universe_hydration_max_symbols: int = Field(default=5, ge=1, le=25)
+    universe_hydration_intraday_max_symbols: int = Field(default=2, ge=1, le=10)
+    universe_hydration_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
     database_path: Path = Path("data/shapefinder.sqlite3")
     scan_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     max_concurrent_scans: int = Field(default=2, ge=1, le=32)

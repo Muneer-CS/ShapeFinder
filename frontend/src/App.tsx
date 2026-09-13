@@ -696,7 +696,9 @@ function App() {
               }
             >
               {search.kind === 'loading'
-                ? 'Searching for similar chart patterns…'
+                ? searchScope === 'custom'
+                  ? 'Searching for similar chart patterns…'
+                  : 'Expanding market coverage and searching cached stocks…'
                 : 'Find Similar Charts'}
             </button>
           </div>
@@ -705,6 +707,7 @@ function App() {
 
       <SearchResults
         state={search}
+        isBroad={searchScope !== 'custom'}
         previews={previews}
         selected={selectedMatch}
         onPreview={(match) => void loadPreview(match)}
@@ -771,12 +774,14 @@ function ReferenceChart({ state }: { state: ReferenceState }) {
 
 function SearchResults({
   state,
+  isBroad,
   previews,
   selected,
   onPreview,
   onSelect,
 }: {
   state: SearchState
+  isBroad: boolean
   previews: Record<string, PreviewState>
   selected: SimilarityMatch | null
   onPreview: (match: SimilarityMatch) => void
@@ -791,8 +796,17 @@ function SearchResults({
       aria-live="polite"
     >
       {state.kind === 'loading' && (
-        <EmptyResult loading title="Searching for similar chart patterns…">
-          Comparing historical windows across your selected stocks.
+        <EmptyResult
+          loading
+          title={
+            isBroad
+              ? 'Expanding market coverage and searching cached stocks…'
+              : 'Searching for similar chart patterns…'
+          }
+        >
+          {isBroad
+            ? 'Loading a small bounded batch, then comparing every scan-ready stock.'
+            : 'Comparing historical windows across your selected stocks.'}
         </EmptyResult>
       )}
       {state.kind === 'error' && (
@@ -821,8 +835,22 @@ function SearchResults({
                 {state.data.statistics.universe_symbols_total.toLocaleString()}{' '}
                 known stocks.
               </strong>{' '}
-              {state.data.statistics.symbols_skipped.toLocaleString()} lacked
-              complete cached history for this interval and period.
+              {state.data.statistics.hydration_succeeded > 0 && (
+                <>
+                  {state.data.statistics.hydration_succeeded.toLocaleString()}{' '}
+                  additional{' '}
+                  {state.data.statistics.hydration_succeeded === 1
+                    ? 'stock was'
+                    : 'stocks were'}{' '}
+                  added to the search cache.{' '}
+                </>
+              )}
+              {state.data.statistics.symbols_skipped.toLocaleString()} still
+              lacked complete cached history for this interval and period.
+              {(state.data.statistics.provider_rate_limited ||
+                state.data.statistics.hydration_provider_unavailable ||
+                state.data.statistics.hydration_timed_out) &&
+                ' Additional market history could not be loaded right now, but cached stocks were still searched.'}
               {state.data.statistics.universe_stale &&
                 ' Universe membership came from a stale local cache.'}
             </div>
@@ -836,7 +864,9 @@ function SearchResults({
               </h3>
               <p>
                 {state.data.statistics.symbols_eligible === 0
-                  ? 'No stocks in this universe have complete cached history for the selected interval and period.'
+                  ? state.data.statistics.hydration_attempted > 0
+                    ? 'No stocks became scan-ready in this bounded attempt. Try again later to continue expanding coverage.'
+                    : 'No stocks in this universe have complete cached history for the selected interval and period.'
                   : 'No matches met your selected similarity threshold.'}
               </p>
             </div>

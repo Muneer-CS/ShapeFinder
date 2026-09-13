@@ -15,7 +15,7 @@ ShapeFinder is a local-first research application that compares a reference pric
 
 - Daily and intraday (`1min`, `5min`, `15min`, `30min`, `1h`, `1day`) reference charts
 - Custom searches for up to 10 tickers
-- Cached-only U.S. Stocks, NASDAQ, and NYSE universe searches
+- Progressively hydrated U.S. Stocks, NASDAQ, and NYSE universe searches
 - Ranked results with Shape, Direction, Path, and Amplitude components
 - Truthful named-universe coverage and stale-cache reporting
 - Lazy match previews, selected comparison charts, and a normalized overlay
@@ -116,7 +116,9 @@ The overall result is a ShapeFinder similarity score from 0 to 100. It is not a 
 
 Universe metadata comes from Twelve Data's stock reference endpoint and is conservatively filtered to active U.S. common stocks. ETFs, ADRs, preferred shares, warrants, rights, funds, REITs, and other instrument classes are excluded.
 
-Named-universe searches are intentionally cached-only: candidates without complete local history for the requested interval and period are skipped rather than fetched unexpectedly. Results report the known, eligible, scanned, and skipped counts so partial coverage is explicit. Custom searches may fetch missing data normally.
+Named-universe searches first reuse every scan-ready local history, then hydrate a small backend-controlled batch of missing symbols through the normal cache-aware market-data service. The default batch is 5 daily symbols and 2 intraday symbols, with a 15-second hydration budget. Afterward, ShapeFinder scans all currently ready symbols and reports the known, ready-before, hydrated, scanned, and skipped counts so partial coverage is explicit. Custom searches retain their existing behavior.
+
+Selection is stable by ticker and skips histories that are already ready. Within a running backend process, a per-search-context cursor rotates past attempted failures so repeated searches progress instead of getting stuck. Successful histories and coverage records persist in SQLite across restarts; the lightweight failure cursor does not.
 
 ## Data and cache behavior
 
@@ -172,7 +174,8 @@ Review [docs/release-checklist.md](docs/release-checklist.md) before publication
 ## Limitations
 
 - Twelve Data is the only live provider adapter currently implemented.
-- Named universes search only scan-ready local histories; there is no background hydration.
+- Named-universe coverage grows only when a user searches; there is no background hydration or full-market guarantee.
+- Hydration progression for unsuccessful symbols is process-local, so a backend restart can retry an earlier failed ticker. Successful cache data remains persistent and is not redownloaded.
 - Intraday candidate windows may span overnight or session boundaries.
 - SQLite and scan admission are process-local and are not designed for distributed multi-worker writes.
 - Provider availability and quotas still apply.

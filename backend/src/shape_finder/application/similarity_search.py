@@ -12,6 +12,7 @@ import numpy as np
 
 from shape_finder.application.market_data_service import MarketDataService
 from shape_finder.application.universe import UniverseService
+from shape_finder.application.universe_hydration import UniverseHydrationService
 from shape_finder.core.market_data import PriceBar, TimeSeries
 from shape_finder.core.persistence import MarketDataRepository
 from shape_finder.core.similarity import (
@@ -33,7 +34,7 @@ from shape_finder.core.universe import UniverseKind
 
 MAX_CANDIDATE_SYMBOLS = 10
 MAX_TOP_N = 100
-MAX_UNIVERSE_SYMBOLS = 5_000
+MAX_UNIVERSE_SYMBOLS = 50_000
 MAX_SCAN_WINDOWS = 2_000_000
 _SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
 logger = logging.getLogger("shape_finder.similarity")
@@ -224,11 +225,13 @@ class SimilaritySearchService:
         scanner: HistoricalSimilarityScanner,
         repository: MarketDataRepository | None = None,
         universe_service: UniverseService | None = None,
+        hydration_service: UniverseHydrationService | None = None,
     ) -> None:
         self._market_data = market_data
         self._scanner = scanner
         self._repository = repository
         self._universe_service = universe_service
+        self._hydration_service = hydration_service
 
     async def search(self, query: SimilaritySearchQuery) -> SimilaritySearchResult:
         started = perf_counter()
@@ -278,21 +281,35 @@ class SimilaritySearchService:
     ) -> SimilaritySearchResult:
         if self._repository is None or self._universe_service is None or query.universe is None:
             raise InvalidSimilaritySearchError("Broad-universe search is not configured.")
-        symbols, _, stale = await self._universe_service.resolve(query.universe.kind)
+        hydration = None
+        if self._hydration_service is not None:
+            hydration = await self._hydration_service.hydrate(
+                query.universe.kind,
+                query.search_start,
+                query.search_end,
+                query.interval,
+                len(tuple(bar for bar in reference.bars if _valid_bar(bar))),
+            )
+            symbols = hydration.symbols
+            eligible = hydration.ready_after
+            stale = hydration.universe_stale
+        else:
+            symbols, _, stale = await self._universe_service.resolve(query.universe.kind)
+            reference_bars = tuple(bar for bar in reference.bars if _valid_bar(bar))
+            eligible = tuple(
+                await self._repository.get_scan_ready_symbols(
+                    symbols,
+                    query.interval,
+                    query.search_start,
+                    query.search_end,
+                    len(reference_bars),
+                )
+            )
         if len(symbols) > MAX_UNIVERSE_SYMBOLS:
             raise InvalidSimilaritySearchError(
                 f"The selected universe exceeds the {MAX_UNIVERSE_SYMBOLS}-symbol safety limit."
             )
         reference_bars = tuple(bar for bar in reference.bars if _valid_bar(bar))
-        eligible = tuple(
-            await self._repository.get_scan_ready_symbols(
-                symbols,
-                query.interval,
-                query.search_start,
-                query.search_end,
-                len(reference_bars),
-            )
-        )
         estimated_bars = _estimated_periods(query.search_start, query.search_end, query.interval)
         estimated_windows = len(eligible) * max(0, estimated_bars - len(reference_bars) + 1)
         if estimated_windows > MAX_SCAN_WINDOWS:
@@ -319,6 +336,21 @@ class SimilaritySearchService:
                 symbols_skipped=len(symbols) - len(eligible),
                 symbols_failed=0,
                 universe_stale=stale,
+                ready_before_hydration=(
+                    len(hydration.ready_before) if hydration is not None else len(eligible)
+                ),
+                hydration_limit=(hydration.hydration_limit if hydration is not None else 0),
+                hydration_attempted=(hydration.attempted if hydration is not None else 0),
+                hydration_succeeded=(hydration.succeeded if hydration is not None else 0),
+                hydration_failed=(hydration.failed if hydration is not None else 0),
+                ready_after_hydration=len(eligible),
+                provider_rate_limited=(
+                    hydration.provider_rate_limited if hydration is not None else False
+                ),
+                hydration_provider_unavailable=(
+                    hydration.provider_unavailable if hydration is not None else False
+                ),
+                hydration_timed_out=(hydration.timed_out if hydration is not None else False),
             ),
         )
         self._log_complete(final, started)
