@@ -2,28 +2,18 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
-const bars = (symbol = 'NVDA') => ({
+const bars = (symbol = 'NVDA', count = 2) => ({
   symbol,
   interval: '1day',
   timezone: 'America/New_York',
-  bars: [
-    {
-      timestamp: '2025-01-02T00:00:00-05:00',
-      open: '100',
-      high: '104',
-      low: '99',
-      close: '102.5',
-      volume: '1000',
-    },
-    {
-      timestamp: '2025-01-03T00:00:00-05:00',
-      open: '102.5',
-      high: '106',
-      low: '101',
-      close: '105',
-      volume: '1200',
-    },
-  ],
+  bars: Array.from({ length: count }, (_, index) => ({
+    timestamp: `2025-01-${String(index + 2).padStart(2, '0')}T00:00:00-05:00`,
+    open: String(100 + index),
+    high: String(104 + index),
+    low: String(99 + index),
+    close: String(102.5 + index),
+    volume: String(1000 + index * 100),
+  })),
 })
 
 const matches = [
@@ -258,6 +248,37 @@ describe('reference workflow', () => {
       screen.queryByRole('img', { name: 'NVDA reference closing price chart' }),
     ).not.toBeInTheDocument()
   })
+
+  it.each([
+    [15, true],
+    [16, false],
+  ])(
+    'shows the evidence-based short-window warning boundary for %i bars',
+    async (count, shouldWarn) => {
+      const fetchMock = mockApi()
+      fetchMock.mockImplementation((input: string | URL | Request) => {
+        const url = String(input)
+        if (url.includes('/health'))
+          return Promise.resolve(response({ status: 'ok' }))
+        if (url.endsWith('/api/v1/universes'))
+          return Promise.resolve(response({ universes: [] }))
+        if (url.includes('/similarity/search'))
+          return Promise.resolve(response(searchSuccess()))
+        return Promise.resolve(response(bars('NVDA', count)))
+      })
+      render(<App />)
+      await loadReference()
+      const warning = screen.queryByText(
+        'Very short reference windows can produce less reliable similarity scores.',
+      )
+      if (shouldWarn) expect(warning).toBeInTheDocument()
+      else expect(warning).not.toBeInTheDocument()
+      expect(
+        screen.getByRole('button', { name: 'Find Similar Charts' }),
+      ).toBeEnabled()
+      if (shouldWarn) await runSearch()
+    },
+  )
 
   it('validates reference inputs and shows loading and safe errors', async () => {
     mockApi()
@@ -589,17 +610,28 @@ describe('similarity search workflow', () => {
     })
   })
 
-  it('offers Any and every minimum-similarity preset', () => {
+  it('offers the evidence-backed minimum-similarity presets with Any as default', () => {
     mockApi()
     render(<App />)
     const control = screen.getByLabelText('Minimum similarity')
     expect(
       within(control).getByRole('option', { name: 'Any similarity' }),
     ).toBeInTheDocument()
-    for (const value of ['70%+', '75%+', '80%+', '85%+', '90%+', 'Custom'])
+    expect(control).toHaveValue('any')
+    for (const value of [
+      '75%+ — Exploratory',
+      '80%+ — Useful',
+      '85%+ — Strong',
+      '90%+ — Exceptional',
+      'Custom',
+    ])
       expect(
         within(control).getByRole('option', { name: value }),
       ).toBeInTheDocument()
+    expect(within(control).queryByRole('option', { name: '70%+' })).toBeNull()
+    expect(
+      screen.getByText('80%+ is a good starting point for useful matches.'),
+    ).toBeInTheDocument()
   })
 
   it('sends Any as null and every preset as its inclusive score', async () => {
@@ -609,7 +641,6 @@ describe('similarity search workflow', () => {
     const control = screen.getByLabelText('Minimum similarity')
     for (const [selection, expected] of [
       ['any', null],
-      ['70', 70],
       ['75', 75],
       ['80', 80],
       ['85', 85],

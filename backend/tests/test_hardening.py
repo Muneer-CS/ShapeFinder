@@ -123,7 +123,7 @@ def test_readiness_checks_local_database_only(tmp_path: Path) -> None:
     assert response.json() == {
         "status": "ready",
         "service": "shape-finder-api",
-        "version": "0.2.0-dev",
+        "version": "0.2.0-rc.1",
         "database": "ready",
     }
 

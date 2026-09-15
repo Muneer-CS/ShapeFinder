@@ -436,6 +436,15 @@ button:disabled {
 .reference-result {
   min-height: 28rem;
 }
+.short-window-warning {
+  margin: 0 1.5rem 1rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgba(193, 139, 48, 0.38);
+  border-radius: 0.65rem;
+  color: #a8b7b1;
+  background: rgba(193, 139, 48, 0.08);
+  font-size: 0.88rem;
+}
 .empty-state {
   min-height: 25rem;
   display: flex;

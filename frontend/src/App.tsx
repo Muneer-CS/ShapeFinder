@@ -49,8 +49,7 @@ type PreviewState =
   | { kind: 'loading' }
   | { kind: 'success'; data: TimeSeriesResponse }
   | { kind: 'error' }
-type MinimumSimilarityPreset =
-  'any' | '70' | '75' | '80' | '85' | '90' | 'custom'
+type MinimumSimilarityPreset = 'any' | '75' | '80' | '85' | '90' | 'custom'
 
 const ChartVisuals = lazy(() => import('./ChartVisuals'))
 
@@ -603,14 +602,13 @@ function App() {
               }
             >
               <option value="any">Any similarity</option>
-              <option value="70">70%+</option>
-              <option value="75">75%+</option>
-              <option value="80">80%+</option>
-              <option value="85">85%+</option>
-              <option value="90">90%+</option>
+              <option value="75">75%+ — Exploratory</option>
+              <option value="80">80%+ — Useful</option>
+              <option value="85">85%+ — Strong</option>
+              <option value="90">90%+ — Exceptional</option>
               <option value="custom">Custom</option>
             </select>
-            <small>Only show matches at or above this score.</small>
+            <small>80%+ is a good starting point for useful matches.</small>
             {minimumSimilarityPreset === 'custom' && (
               <>
                 <label htmlFor="custom-minimum-similarity">
@@ -786,7 +784,7 @@ function App() {
       )}
 
       <footer>
-        <span>ShapeFinder 0.2.0-dev</span>
+        <span>ShapeFinder 0.2.0-rc.1</span>
         <span>Engineered chart-shape similarity · No predictions</span>
       </footer>
     </main>
@@ -825,6 +823,12 @@ function ReferenceChart({ state }: { state: ReferenceState }) {
             interval={state.query.interval}
             bars={state.data.bars.length}
           />
+          {state.data.bars.length <= 15 && (
+            <p className="short-window-warning" role="note">
+              Very short reference windows can produce less reliable similarity
+              scores.
+            </p>
+          )}
           <PriceChart
             series={state.data}
             label={`${state.data.symbol} reference closing price chart`}

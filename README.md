@@ -114,7 +114,7 @@ The overall result is a ShapeFinder similarity score from 0 to 100. It is not a 
 
 The cached real-market [score usefulness evaluation](docs/similarity-score-evaluation.md) supports 80%+ as a practical starting point and 85%+ as strong, while documenting short-window and generic-trend caveats. These are empirical product guidelines, not probabilistic guarantees.
 
-Before searching, the UI can filter results with Any similarity, 70%+, 75%+, 80%+, 85%+, 90%+, or a custom 0–100 value. Any similarity is the backward-compatible default. The filter only removes results below the chosen existing score; it does not change scoring, ranking, overlap handling, hydration, or scan coverage.
+Before searching, the UI can filter results with Any similarity, exploratory 75%+, useful 80%+, strong 85%+, exceptional 90%+, or a custom 0–100 value. Any similarity is the backward-compatible default. The filter only removes results below the chosen existing score; it does not change scoring, ranking, overlap handling, hydration, or scan coverage. References with 15 bars or fewer receive a non-blocking reliability warning because the cached evaluation found material short-window score inflation.
 
 ## Stock universes
 
@@ -175,7 +175,7 @@ Real-provider validation is optional and quota-conscious. See [docs/real-market-
 - Request bodies, concurrent scans, scan duration, candidate count, and estimated window count are bounded.
 - `.env`, SQLite files, build output, validation output, caches, and temporary artifacts are ignored.
 
-Review [docs/release-checklist.md](docs/release-checklist.md) before publication or deployment.
+Review the [v0.2.0 release notes](docs/v0.2.0-release-notes.md) and [release checklist](docs/release-checklist.md) before publication or deployment.
 
 ## Limitations
 

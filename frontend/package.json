@@ -1,7 +1,7 @@
 {
   "name": "shape-finder-frontend",
   "private": true,
-  "version": "0.2.0-dev",
+  "version": "0.2.0-rc.1",
   "type": "module",
   "engines": {
     "node": ">=20"
