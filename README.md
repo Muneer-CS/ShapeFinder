@@ -112,6 +112,8 @@ Similarity Engine V1 compares normalized closing-price sequences with fixed weig
 
 The overall result is a ShapeFinder similarity score from 0 to 100. It is not a probability, confidence estimate, or prediction. Exact formulas and numerical policies are documented in [docs/architecture.md](docs/architecture.md#similarity-engine-v1).
 
+The cached real-market [score usefulness evaluation](docs/similarity-score-evaluation.md) supports 80%+ as a practical starting point and 85%+ as strong, while documenting short-window and generic-trend caveats. These are empirical product guidelines, not probabilistic guarantees.
+
 Before searching, the UI can filter results with Any similarity, 70%+, 75%+, 80%+, 85%+, 90%+, or a custom 0–100 value. Any similarity is the backward-compatible default. The filter only removes results below the chosen existing score; it does not change scoring, ranking, overlap handling, hydration, or scan coverage.
 
 ## Stock universes
