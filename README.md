@@ -4,7 +4,7 @@ Find historical stock charts with similar price patterns.
 
 ShapeFinder is a local-first research application that compares a reference price chart with earlier chart windows across selected stocks. It ranks descriptive shape similarity; it does not forecast prices or produce trading signals.
 
-https://shapefinder-frontend-production.up.railway.app/
+**Live Website:** https://shapefinder-frontend-production.up.railway.app/
 
 ## What it does
 
