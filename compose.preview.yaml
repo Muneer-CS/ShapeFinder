@@ -1,0 +1,30 @@
+name: shapefinder-owner-preview
+services:
+  shapefinder-preview-web:
+    build: ./frontend
+    environment:
+      BACKEND_UPSTREAM: http://shapefinder-preview-api:8000
+      SHAPEFINDER_PUBLIC_HOST: 127.0.0.1
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:4181:3000"
+  shapefinder-preview-api:
+    build: ./backend
+    environment:
+      APP_ENV: production
+      API_HOST: 0.0.0.0
+      PORT: "8000"
+      SHAPEFINDER_PUBLIC_ORIGIN: http://127.0.0.1:4181
+      SHAPEFINDER_OWNER_USERNAME: ${SHAPEFINDER_OWNER_USERNAME:?Set a preview owner username}
+      SHAPEFINDER_OWNER_PASSWORD: ${SHAPEFINDER_OWNER_PASSWORD:?Set a preview owner password}
+      SHAPEFINDER_DATA_DIR: /data
+      DATABASE_PATH: /data/shapefinder.sqlite3
+      CURRENT_DAILY_PROVIDER: massive
+      MASSIVE_API_KEY: ${MASSIVE_API_KEY:-}
+      MASSIVE_BACKFILL_SESSIONS: "63"
+      MASSIVE_PUBLICATION_TIME_ET: "20:15"
+      MASSIVE_REFRESH_ENABLED: ${MASSIVE_REFRESH_ENABLED:-false}
+    volumes:
+      - preview-data:/data
+volumes:
+  preview-data:

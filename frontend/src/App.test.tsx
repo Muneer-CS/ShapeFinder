@@ -1,6 +1,12 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import App from './App'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import App from './LegacyApp'
+
+// Workflow assertions exercise the real chart without timing its cold module import.
+// App.lazy.test.tsx separately exercises the unresolved import and fallback.
+beforeAll(async () => {
+  await import('./ChartVisuals')
+})
 
 const bars = (symbol = 'NVDA', count = 2) => ({
   symbol,

@@ -2,22 +2,29 @@
 	admin off
 	persist_config off
 	auto_https off
-	log {
-		format json
-	}
-	servers {
-		trusted_proxies static private_ranges 100.0.0.0/8
-	}
 }
 
 :{$PORT:3000} {
-	log {
-		format json
+	@owner_host host {$SHAPEFINDER_PUBLIC_HOST}
+	route {
+		header Cache-Control "private, no-store"
+		handle /__health {
+			reverse_proxy {$BACKEND_UPSTREAM}
+		}
+		handle @owner_host {
+			route {
+				forward_auth {$BACKEND_UPSTREAM} {
+					uri /__owner_auth
+				}
+				handle /api/* {
+					reverse_proxy {$BACKEND_UPSTREAM}
+				}
+				root * /app/dist
+				try_files {path} /index.html
+				encode gzip
+				file_server
+			}
+		}
+		respond 421
 	}
-
-	rewrite /health /*
-	root * /app/dist
-	encode gzip
-	file_server
-	try_files {path} /index.html
 }

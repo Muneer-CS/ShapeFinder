@@ -1,5 +1,10 @@
 # ShapeFinder
 
+For the current drawing workspace and Massive-backed daily scans, see the
+[workspace guide](docs/presentation-workspace.md). The
+[owner-only preview runbook](docs/owner-preview.md) describes the private hosted build.
+The sections below document the legacy historical search and its local development workflow.
+
 Find historical stock charts with similar price patterns.
 
 ShapeFinder is a local-first research application that compares a reference price chart with earlier chart windows across selected stocks. It ranks descriptive shape similarity; it does not forecast prices or produce trading signals.

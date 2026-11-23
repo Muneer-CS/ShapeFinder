@@ -1,0 +1,12 @@
+.env*
+data
+.venv
+.*cache
+.coverage*
+.pytest-*
+.test-tmp*
+validation-output
+**/__pycache__
+**/*.sqlite3*
+**/*.db*
+**/*.log

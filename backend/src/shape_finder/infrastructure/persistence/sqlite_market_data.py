@@ -11,6 +11,7 @@ from shape_finder.core.errors import CacheError, MalformedProviderResponseError
 from shape_finder.core.market_data import BarInterval, PriceBar, TimeSeries, validate_time_series
 from shape_finder.core.persistence import CoverageRange, HydrationFailureRecord
 from shape_finder.core.universe import SymbolMetadata
+from shape_finder.infrastructure.persistence.migration_backup import backup_before_v4
 from shape_finder.infrastructure.persistence.migrations import MIGRATIONS
 
 
@@ -25,6 +26,11 @@ class SQLiteMarketDataRepository:
 
     def __init__(self, path: Path) -> None:
         self._path = path
+        self.last_migration_backup: Path | None = None
+
+    @property
+    def path(self) -> Path:
+        return self._path
 
     async def initialize(self) -> None:
         await asyncio.to_thread(self._initialize_sync)
@@ -40,6 +46,7 @@ class SQLiteMarketDataRepository:
 
     def _initialize_sync(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        self.last_migration_backup = backup_before_v4(self._path)
         with closing(self._connect()) as connection:
             connection.execute(
                 """
@@ -64,6 +71,11 @@ class SQLiteMarketDataRepository:
                 if migration.version in applied:
                     continue
                 with connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    if connection.execute(
+                        "SELECT 1 FROM schema_migrations WHERE version=?", (migration.version,)
+                    ).fetchone():
+                        continue
                     for statement in migration.statements:
                         connection.execute(statement)
                     connection.execute(

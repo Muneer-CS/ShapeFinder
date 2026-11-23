@@ -91,4 +91,45 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=4,
+        statements=(
+            """CREATE TABLE current_candles (
+                symbol TEXT NOT NULL, interval TEXT NOT NULL, open_at TEXT NOT NULL,
+                policy_key TEXT NOT NULL, payload TEXT NOT NULL,
+                PRIMARY KEY(symbol, interval, open_at, policy_key)
+            ) WITHOUT ROWID""",
+            """CREATE TABLE provider_coordination (
+                account_scope TEXT PRIMARY KEY, owner TEXT, lease_until REAL NOT NULL DEFAULT 0,
+                cooldown_until REAL NOT NULL DEFAULT 0
+            ) WITHOUT ROWID""",
+            """CREATE TABLE provider_attempts (
+                id INTEGER PRIMARY KEY, account_scope TEXT NOT NULL, started_at REAL NOT NULL,
+                endpoint TEXT NOT NULL, credit_cost INTEGER
+            )""",
+            """CREATE INDEX provider_attempts_scope_time
+                ON provider_attempts(account_scope, started_at)""",
+        ),
+    ),
+    Migration(
+        version=5,
+        statements=(
+            """CREATE TABLE massive_listings (
+                symbol TEXT PRIMARY KEY, name TEXT NOT NULL, exchange TEXT NOT NULL
+            ) WITHOUT ROWID""",
+            """CREATE TABLE massive_catalogue (
+                id INTEGER PRIMARY KEY CHECK(id=1), retrieved_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE massive_sessions (
+                session_date TEXT PRIMARY KEY, retrieved_at TEXT NOT NULL
+            ) WITHOUT ROWID""",
+            """CREATE TABLE massive_daily_bars (
+                symbol TEXT NOT NULL, session_date TEXT NOT NULL REFERENCES massive_sessions,
+                open TEXT NOT NULL, high TEXT NOT NULL, low TEXT NOT NULL,
+                close TEXT NOT NULL, volume TEXT NOT NULL,
+                PRIMARY KEY(symbol, session_date)
+            ) WITHOUT ROWID""",
+            "CREATE INDEX massive_daily_bars_session ON massive_daily_bars(session_date)",
+        ),
+    ),
 )
