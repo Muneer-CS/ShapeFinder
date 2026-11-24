@@ -62,6 +62,15 @@ class MassiveStore:
                 )
             }
 
+    def prune_before(self, earliest: date) -> None:
+        """Expire daily batches and their candles together, leaving other caches alone."""
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("PRAGMA foreign_keys=ON")
+            db.execute("PRAGMA secure_delete=ON")
+            stamp = earliest.isoformat()
+            db.execute("DELETE FROM massive_daily_bars WHERE session_date < ?", (stamp,))
+            db.execute("DELETE FROM massive_sessions WHERE session_date < ?", (stamp,))
+
     def save_session(
         self, day: date, bars: Sequence[DailyBar], retrieved: datetime, eligible_at: datetime
     ) -> None:

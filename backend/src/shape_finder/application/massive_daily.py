@@ -39,8 +39,9 @@ MAX_SESSION_LAG = 2
 
 
 def publication_at(candle: CandleIdentity, publication: time) -> datetime:
-    release = datetime.combine(candle.session_date, publication, EASTERN).astimezone(UTC)
-    return max(release, candle.close_at)
+    # Stocks Basic REST excludes the current Eastern calendar date, even after close.
+    following_date = candle.session_date + timedelta(days=1)
+    return datetime.combine(following_date, publication, EASTERN).astimezone(UTC)
 
 
 def required_sessions(
@@ -280,6 +281,8 @@ def refresh_daily(
     force_catalogue: bool = False,
 ) -> dict[str, object]:
     required = required_sessions(cutoff, count, publication)
+    # Expire out-of-window rows even if the provider is unavailable on this run.
+    store.prune_before(required[0].session_date)
     members, refreshed = store.catalog_snapshot()
     if force_catalogue or refreshed is None or cutoff - refreshed >= catalogue_ttl:
         members = client.catalogue()

@@ -13,13 +13,10 @@ session when leaving a shared device.
 
 ## Preview setup for Prompt 22
 
-Use a separate Railway project, **ShapeFinder Owner Preview**, with its own
-environment, web domain, owner password, and empty preview volume. Leave the
-existing service, domain, branches, and volume in place during preview. The
-current public URL responded successfully to an unauthenticated HTTPS request
-on November 23, 2026. Railway dashboard authentication was required, so the
-existing service sources, automatic deployments, backend ingress, access,
-volume mount, and backup settings still need dashboard verification.
+Use the isolated **owner-preview** environment in **ShapeFinder v0.2 Dev**.
+It has a separate domain, owner password, and volume. The public **ShapeFinder**
+project's frontend and backend auto-deploy from `main`. Leave them in place
+until the signed-in real-data preview passes.
 
 | Service | Docker build root | Networking and deploy settings |
 | --- | --- | --- |
@@ -47,15 +44,15 @@ See [Railway Dockerfiles](https://docs.railway.com/builds/dockerfiles),
 | Web | `SHAPEFINDER_PUBLIC_HOST` | Bare preview HTTPS hostname, without a scheme, port, or path |
 | Web | `BACKEND_UPSTREAM` | `http://${{shapefinder-preview-api.RAILWAY_PRIVATE_DOMAIN}}:8000` |
 | API | `APP_ENV` | `production` |
-| API | `API_HOST` | `::` to accept Railway private IPv6 |
+| API | `API_HOST` | `0.0.0.0` for Railway health checks and the preview private IPv4 network |
 | API | `PORT` | `8000` |
 | API | `SHAPEFINDER_PUBLIC_ORIGIN` | Exact HTTPS preview origin without a trailing slash |
 | API | `SHAPEFINDER_OWNER_USERNAME` | A single owner username, letters, digits, `_`, `-`, or `.` |
 | API | `SHAPEFINDER_OWNER_PASSWORD` | A unique randomly generated password, 24 to 128 printable ASCII characters without spaces |
-| API | `DATABASE_PATH` | `/data/shapefinder.sqlite3` |
+| API | `DATABASE_PATH` | `/data/shapefinder-massive.sqlite3`, separate from the synthetic database |
 | API | `CURRENT_DAILY_PROVIDER` | `massive` |
 | API | `MASSIVE_BACKFILL_SESSIONS` | `63` |
-| API | `MASSIVE_PUBLICATION_TIME_ET` | `20:15` initially. Availability at that time still needs observation. |
+| API | `MASSIVE_PUBLICATION_TIME_ET` | `00:05` Eastern on the calendar day after the trading session, including weekends and holidays. |
 | API | `MASSIVE_REFRESH_ENABLED` | `false` until licensing is confirmed and the first backfill has passed |
 | API | `MASSIVE_API_KEY` | API service secret, added by the owner once hosted data use is confirmed |
 
@@ -78,8 +75,9 @@ mounted database and the same request ledger.
 python -B -m scripts.refresh_massive_daily
 ```
 
-Repeat that command after an interruption. Successful grouped sessions are
-reused, pending sessions remain eligible, and the complete catalogue is replaced
+Repeat that command after an interruption. Refresh prunes candles older than
+the configured window of at most 63 trading sessions before contacting Massive.
+Successful grouped sessions are reused, pending sessions remain eligible, and the complete catalogue is replaced
 only after all pages validate. The limiter allows at most five attempts per
 rolling minute across grouped bars and catalogue pages. Avoid running backfills
 against the same Massive key concurrently in separate environments, since

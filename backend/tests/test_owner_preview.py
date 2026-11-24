@@ -83,6 +83,8 @@ def test_hosted_config_fails_closed_and_requires_runtime_volume(tmp_path: Path) 
         hosted_settings(tmp_path, database_path=tmp_path.parent / "outside.sqlite3")
     with pytest.raises(ValidationError, match="MASSIVE_API_KEY"):
         hosted_settings(tmp_path, current_daily_provider="massive", massive_refresh_enabled=True)
+    with pytest.raises(ValidationError, match="massive_backfill_sessions"):
+        hosted_settings(tmp_path, massive_backfill_sessions=64)
 
     settings = hosted_settings(
         tmp_path,
@@ -100,11 +102,12 @@ async def test_refresh_waits_for_eastern_publication_and_resumes_failures(tmp_pa
     stamp = tmp_path / "shapefinder.massive-refresh-date"
     stamp.write_text("2026-11-25\n", encoding="ascii")
     refresh = AsyncMock(side_effect=[False, True])
-    # Thanksgiving has no session. Friday closes early, but publication is still 20:15 ET.
+    # Thanksgiving has no session. Even the early-close Friday waits until Saturday ET.
     assert await refresh_if_due(settings, datetime(2026, 11, 26, 23, tzinfo=UTC), refresh)
     assert await refresh_if_due(settings, datetime(2026, 11, 28, 1, 14, tzinfo=UTC), refresh)
     refresh.assert_not_called()
-    release = datetime(2026, 11, 28, 1, 15, tzinfo=UTC)
+    assert await refresh_if_due(settings, datetime(2026, 11, 28, 5, 4, tzinfo=UTC), refresh)
+    release = datetime(2026, 11, 28, 5, 5, tzinfo=UTC)
     assert not await refresh_if_due(settings, release, refresh)
     assert stamp.read_text(encoding="ascii").strip() == "2026-11-25"
     assert await refresh_if_due(settings, release, refresh)

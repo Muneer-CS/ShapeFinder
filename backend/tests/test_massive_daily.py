@@ -12,6 +12,7 @@ from shape_finder.application.current_pattern_scan import ScanControl
 from shape_finder.application.manual_pattern_scan import ManualPatternScanService
 from shape_finder.application.massive_daily import (
     cached_history,
+    publication_at,
     refresh_daily,
     required_sessions,
     scan_cached_daily,
@@ -26,7 +27,7 @@ from shape_finder.infrastructure.persistence.massive_store import DailyBar, Mass
 from shape_finder.main import create_app
 
 CUTOFF = datetime(2026, 11, 30, 16, tzinfo=UTC)
-PUBLICATION = time(20, 15)
+PUBLICATION = time(0, 5)
 
 
 @pytest.fixture
@@ -419,13 +420,67 @@ def test_forming_daily_thresholds_recency_and_modes(tmp_path: Path) -> None:
 
 
 def test_publication_uses_exchange_dates_across_holiday_weekend_and_early_close() -> None:
-    boundary = datetime(2026, 11, 28, 1, 15, tzinfo=UTC)
+    boundary = datetime(2026, 11, 28, 5, 5, tzinfo=UTC)
     before = required_sessions(boundary - timedelta(seconds=1), 2, PUBLICATION)
     after = required_sessions(boundary, 2, PUBLICATION)
     assert [c.session_date for c in before] == [date(2026, 11, 24), date(2026, 11, 25)]
     assert [c.session_date for c in after] == [date(2026, 11, 25), date(2026, 11, 27)]
     assert after[-1].close_at.astimezone(EASTERN).hour == 13
+    assert publication_at(after[-1], PUBLICATION) == boundary
     assert required_sessions(CUTOFF, 2, PUBLICATION) == after
+
+
+@pytest.mark.parametrize(
+    ("boundary", "expected"),
+    [
+        (datetime(2026, 6, 16, 4, 5, tzinfo=UTC), date(2026, 6, 15)),
+        (datetime(2026, 11, 3, 5, 5, tzinfo=UTC), date(2026, 11, 2)),
+    ],
+)
+def test_basic_availability_uses_midnight_eastern_in_both_dst_periods(
+    boundary: datetime, expected: date
+) -> None:
+    same_day_evening = boundary - timedelta(hours=3)
+    assert same_day_evening.astimezone(EASTERN).date() == expected
+    assert required_sessions(same_day_evening, 1, PUBLICATION)[-1].session_date < expected
+    assert (
+        required_sessions(boundary - timedelta(seconds=1), 1, PUBLICATION)[-1].session_date
+        < expected
+    )
+    eligible = required_sessions(boundary, 1, PUBLICATION)[-1]
+    assert eligible.session_date == expected
+    assert publication_at(eligible, PUBLICATION) == boundary
+
+
+def test_refresh_expires_old_bars_even_when_provider_is_unavailable(tmp_path: Path) -> None:
+    current = CurrentDataStore(tmp_path / "data.sqlite3")
+    current.initialize()
+    store = MassiveStore(current.path)
+    before_midnight = datetime(2026, 11, 24, 4, 50, tzinfo=UTC)
+    after_midnight = datetime(2026, 11, 24, 5, 5, tzinfo=UTC)
+    old = required_sessions(before_midnight, 63, PUBLICATION)
+    new = required_sessions(after_midnight, 63, PUBLICATION)
+    bar = DailyBar("AAPL", *(Decimal(100) for _ in range(5)))
+    store.replace_catalog(
+        (SymbolMetadata("AAPL", "Apple", "NASDAQ", "United States", "Common Stock", "USD"),),
+        before_midnight,
+    )
+    for candle in old:
+        store.save_session(candle.session_date, (bar,), before_midnight, before_midnight)
+
+    def unavailable(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith(new[-1].session_date.isoformat())
+        return httpx.Response(503)
+
+    with httpx.Client(
+        base_url="https://api.massive.com", transport=httpx.MockTransport(unavailable)
+    ) as http:
+        adapter = MassiveClient(http, current, clock=after_midnight.timestamp)
+        result = refresh_daily(store, adapter, after_midnight, 63, PUBLICATION, timedelta(days=1))
+    assert result["pending_sessions"] == [new[-1].session_date.isoformat()]
+    assert result["http_attempts"] == 1
+    assert set(store.completed()) == {c.session_date for c in new[:-1]}
+    assert not store.history("AAPL", old[0].session_date, old[0].session_date)
 
 
 def test_refresh_paginates_resumes_reuses_and_keeps_last_complete_catalogue(tmp_path: Path) -> None:

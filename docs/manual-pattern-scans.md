@@ -59,12 +59,13 @@ for completed daily scans of the Nasdaq or NYSE universe. The refresh command
 reads `MASSIVE_API_KEY` from its process environment. The scanner does not need
 that key. Run both against the same `DATABASE_PATH`.
 
-`MASSIVE_BACKFILL_SESSIONS` defaults to 63 exchange sessions. During the initial
-backfill, select a scanner maximum duration within the available history.
-`MASSIVE_PUBLICATION_TIME_ET` defaults to 20:15 on the session date, based on
-[Massive's announced schedule](https://massive.com/changelog). Treat it as a
-provisional eligibility threshold. A session must also have a validated saved
-batch. The pilot only observed morning availability.
+`MASSIVE_BACKFILL_SESSIONS` defaults to the maximum of 63 exchange sessions.
+The refresh removes candles older than that rolling window before making
+provider requests. During backfill, choose a scan duration within the saved
+history. `MASSIVE_PUBLICATION_TIME_ET` defaults to 00:05 Eastern on the next
+calendar day, including Saturday for a Friday session. Massive documents
+Stocks Basic REST availability after midnight Eastern. A scan still requires a
+validated saved batch. See [Massive's Stocks Basic publication guidance](https://massive.com/knowledge-base/article/on-the-free-basic-plan-when-can-i-pull-the-previous-trading-days-data).
 
 From the backend directory, run
 `python -B -m scripts.refresh_massive_daily --refresh-catalogue` for the first

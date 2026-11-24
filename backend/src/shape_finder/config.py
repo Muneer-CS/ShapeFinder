@@ -25,9 +25,9 @@ class Settings(BaseSettings):
     twelve_data_api_key: SecretStr | None = None
     twelve_data_base_url: str = "https://api.twelvedata.com"
     current_daily_provider: Literal["twelve_data", "massive"] = "twelve_data"
-    massive_backfill_sessions: int = Field(default=63, ge=1, le=240)
+    massive_backfill_sessions: int = Field(default=63, ge=1, le=63)
     massive_publication_time_et: str = Field(
-        default="20:15", pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+        default="00:05", pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
     )
     massive_api_key: SecretStr | None = None
     massive_refresh_enabled: bool = False
