@@ -35,6 +35,7 @@ const history = {
   symbol: 'AAPL',
   interval: '1day',
   timezone: 'America/New_York',
+  cached_range: { start: '2024-12-02', end: '2025-01-06' },
   bars: prices.map((price, i) => ({
     timestamp: `2025-01-0${i + 2}T14:30:00Z`,
     open: String(price),
@@ -125,6 +126,11 @@ async function importPattern() {
   })
   fireEvent.click(screen.getByRole('button', { name: 'Load stock history' }))
   await screen.findByRole('img', { name: 'AAPL closing price selection chart' })
+  expect(
+    screen.getByText(
+      /Available cached sessions for AAPL: 2024-12-02 through 2025-01-06/,
+    ),
+  ).toBeVisible()
   fireEvent.click(
     screen.getByRole('button', { name: 'Import selected section' }),
   )

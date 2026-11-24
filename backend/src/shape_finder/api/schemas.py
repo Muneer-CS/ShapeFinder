@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -31,11 +31,17 @@ class PriceBarResponse(BaseModel):
     volume: Decimal
 
 
+class CachedDateRange(BaseModel):
+    start: date
+    end: date
+
+
 class TimeSeriesResponse(BaseModel):
     symbol: str
     interval: str
     timezone: str
     bars: list[PriceBarResponse]
+    cached_range: CachedDateRange | None = None
 
 
 class ReferenceSearchRequest(BaseModel):

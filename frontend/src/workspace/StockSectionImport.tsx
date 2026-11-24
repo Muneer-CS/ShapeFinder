@@ -137,9 +137,9 @@ export function StockSectionImport({
       <details open={open || undefined}>
         <summary id="import-title">Import a stock-chart section</summary>
         <p className="helper">
-          Load history only when needed. Dates cover whole UTC days. Select
-          observations on the chart, review the range, then import its
-          closing-price shape.
+          Daily dates refer to trading sessions. Intraday dates cover whole UTC
+          days. Select observations on the chart, then import its closing-price
+          shape.
         </p>
         <form
           onSubmit={(e) => {
@@ -211,6 +211,14 @@ export function StockSectionImport({
         {history && (
           <>
             <h3>{history.symbol} closing prices</h3>
+            {history.cached_range && (
+              <p className="helper">
+                Available cached sessions for {history.symbol}:{' '}
+                {history.cached_range.start}
+                {' through '}
+                {history.cached_range.end}.
+              </p>
+            )}
             <p className="helper">
               Source timestamps are shown as supplied ({history.timezone}).
               Click a start, then an end. No data requests occur during

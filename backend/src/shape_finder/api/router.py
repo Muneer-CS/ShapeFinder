@@ -1,8 +1,9 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request
+from starlette.concurrency import run_in_threadpool
 
 from shape_finder import __version__
 from shape_finder.api.dependencies import (
@@ -11,6 +12,7 @@ from shape_finder.api.dependencies import (
     get_universe_service,
 )
 from shape_finder.api.schemas import (
+    CachedDateRange,
     HealthResponse,
     PriceBarResponse,
     ReadinessResponse,
@@ -25,12 +27,14 @@ from shape_finder.api.schemas import (
     UniverseResponse,
 )
 from shape_finder.application.market_data_service import MarketDataService
+from shape_finder.application.massive_daily import load_cached_chart
 from shape_finder.application.similarity_search import SimilaritySearchService
 from shape_finder.application.universe import UniverseService
 from shape_finder.core.errors import ReadinessError, ScanTimeoutError
 from shape_finder.core.market_data import BarInterval
 from shape_finder.core.similarity_search import SimilaritySearchQuery
 from shape_finder.core.universe import UniverseSelection
+from shape_finder.infrastructure.persistence.massive_store import MassiveStore
 
 api_router = APIRouter()
 
@@ -78,21 +82,33 @@ async def universes(
 @api_router.get(
     "/market-data/{symbol}",
     response_model=TimeSeriesResponse,
+    response_model_exclude_none=True,
     tags=["market data"],
 )
 async def market_data(
+    request: Request,
     symbol: Annotated[str, Path(pattern=r"^[A-Za-z][A-Za-z0-9.\-]{0,14}$")],
     start: Annotated[datetime, Query(description="Inclusive timezone-aware start timestamp")],
     end: Annotated[datetime, Query(description="Inclusive timezone-aware end timestamp")],
     interval: Annotated[BarInterval, Query()],
     service: Annotated[MarketDataService, Depends(get_market_data_service)],
 ) -> TimeSeriesResponse:
-    series = await service.get_time_series(symbol, start, end, interval)
+    cached_range = None
+    massive_chart: tuple[MassiveStore, time] | None = request.app.state.massive_chart
+    if interval is BarInterval.ONE_DAY and massive_chart is not None:
+        store, publication = massive_chart
+        series, earliest, latest = await run_in_threadpool(
+            load_cached_chart, store, symbol, start, end, publication
+        )
+        cached_range = CachedDateRange(start=earliest, end=latest)
+    else:
+        series = await service.get_time_series(symbol, start, end, interval)
     return TimeSeriesResponse(
         symbol=series.symbol,
         interval=series.interval.value,
         timezone=series.timezone,
         bars=[PriceBarResponse.model_validate(bar, from_attributes=True) for bar in series.bars],
+        cached_range=cached_range,
     )
 
 

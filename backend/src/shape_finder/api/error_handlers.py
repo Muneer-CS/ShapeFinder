@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from shape_finder.core.errors import (
     AuthenticationError,
+    CachedChartHistoryError,
     InvalidDateRangeError,
     InvalidSymbolError,
     MalformedProviderResponseError,
@@ -68,6 +69,10 @@ def _response(
 
 
 def register_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(CachedChartHistoryError)
+    async def cached_chart_error(request: Request, error: CachedChartHistoryError) -> JSONResponse:
+        return _response(request, error.status, error.code, str(error))
+
     @app.exception_handler(InvalidSimilaritySearchError)
     async def similarity_search_error(
         request: Request, error: InvalidSimilaritySearchError

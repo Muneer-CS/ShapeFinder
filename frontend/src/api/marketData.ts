@@ -21,6 +21,7 @@ export type TimeSeriesResponse = {
   interval: MarketInterval
   timezone: string
   bars: PriceBar[]
+  cached_range?: { start: string; end: string }
 }
 type ApiErrorBody = { error?: { code?: string; message?: string } }
 
@@ -42,6 +43,10 @@ function isTimeSeriesResponse(value: unknown): value is TimeSeriesResponse {
     typeof candidate.symbol === 'string' &&
     typeof candidate.interval === 'string' &&
     typeof candidate.timezone === 'string' &&
+    (candidate.cached_range === undefined ||
+      (candidate.cached_range != null &&
+        /^\d{4}-\d{2}-\d{2}$/.test(candidate.cached_range.start) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(candidate.cached_range.end))) &&
     Array.isArray(candidate.bars) &&
     candidate.bars.every(
       (bar) =>

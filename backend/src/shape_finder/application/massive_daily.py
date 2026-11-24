@@ -17,7 +17,8 @@ from shape_finder.application.current_pattern_scan import (
 )
 from shape_finder.core.candle_eligibility import CandleIdentity, Freshness, FrozenCutoff
 from shape_finder.core.current_data import DataUnavailable
-from shape_finder.core.market_data import BarInterval, PriceBar, TimeSeries
+from shape_finder.core.errors import CachedChartHistoryError, InvalidDateRangeError
+from shape_finder.core.market_data import BarInterval, PriceBar, TimeSeries, validate_time_series
 from shape_finder.core.pattern_scan import (
     CanonicalPattern,
     Coverage,
@@ -36,6 +37,71 @@ from shape_finder.infrastructure.persistence.massive_store import (
 
 SCHEDULE_LISTING = SymbolMetadata("AAPL", "Apple", "NASDAQ", "United States", "Common Stock", "USD")
 MAX_SESSION_LAG = 2
+
+
+def load_cached_chart(
+    store: MassiveStore, symbol: str, start: datetime, end: datetime, publication: time
+) -> tuple[TimeSeries, date, date]:
+    """Read a complete reference window from the same stored batches as the scanner."""
+    if start.tzinfo is None or end.tzinfo is None or start >= end:
+        raise InvalidDateRangeError("Provide ordered, timezone-aware timestamps.")
+    symbol = symbol.upper()
+    # The existing chart client sends whole UTC dates. Use those date labels
+    # as US trading dates and return the same session-open timestamps as scans.
+    first, last = start.astimezone(UTC).date(), end.astimezone(UTC).date()
+    try:
+        cached = store.history(symbol, date.min, date.max)
+    except ValueError as error:
+        raise CachedChartHistoryError(
+            "CACHED_CHART_INVALID", f"The saved daily candles for {symbol} are invalid."
+        ) from error
+    if not cached:
+        raise CachedChartHistoryError(
+            "CACHED_CHART_EMPTY", f"No saved daily candles for {symbol}.", status=404
+        )
+    earliest, latest = min(cached), max(cached)
+    coverage = f"Available cache for {symbol}: {earliest} through {latest}."
+    # Include adjacent closures when comparing dates to the stored bounds,
+    # without constructing an exchange calendar for an unbounded request.
+    lower = max(earliest, date(2000, 1, 8)) - timedelta(days=7)
+    upper = min(latest, date(2030, 12, 24)) + timedelta(days=7)
+    if first < lower or last > upper:
+        raise CachedChartHistoryError(
+            "CACHED_CHART_OUT_OF_RANGE", f"The requested dates extend outside the cache. {coverage}"
+        )
+    calendar = ListingCalendar(SCHEDULE_LISTING, lower, upper)
+    required = tuple(
+        candle
+        for candle in calendar.candles(BarInterval.ONE_DAY)
+        if first <= candle.session_date <= last
+    )
+    if not required:
+        raise CachedChartHistoryError(
+            "CACHED_CHART_CLOSED", f"No trading sessions in the requested dates. {coverage}"
+        )
+    if required[0].session_date < earliest or required[-1].session_date > latest:
+        raise CachedChartHistoryError(
+            "CACHED_CHART_OUT_OF_RANGE", f"The requested dates extend outside the cache. {coverage}"
+        )
+    missing = [
+        candle.session_date.isoformat()
+        for candle in required
+        if candle.session_date not in cached
+        or cached[candle.session_date][1].tzinfo is None
+        or cached[candle.session_date][1] < publication_at(candle, publication)
+    ]
+    if missing:
+        raise CachedChartHistoryError(
+            "CACHED_CHART_GAP", f"Missing trading sessions: {', '.join(missing)}. {coverage}"
+        )
+    series = _daily_series(symbol, required, cached)
+    try:
+        validate_time_series(series)
+    except ValueError as error:
+        raise CachedChartHistoryError(
+            "CACHED_CHART_INVALID", f"The requested candles for {symbol} are invalid. {coverage}"
+        ) from error
+    return series, earliest, latest
 
 
 def publication_at(candle: CandleIdentity, publication: time) -> datetime:
@@ -122,13 +188,10 @@ def _select_history(
     if len(required) < minimum:
         raise DataUnavailable("massive_daily_history_gap")
     expected = required[-1]
-    bars = tuple(
-        PriceBar(candle.open_at, *cached[candle.session_date][0][1:]) for candle in required
-    )
     eligible_at = published[expected.session_date]
     return EligibleHistory(
         symbol,
-        TimeSeries(symbol, BarInterval.ONE_DAY, expected.timezone, bars),
+        _daily_series(symbol, required, cached),
         Freshness(
             cutoff_at=cutoff.cutoff_at,
             status="current",
@@ -141,6 +204,15 @@ def _select_history(
         ),
         required,
     )
+
+
+def _daily_series(
+    symbol: str, required: tuple[CandleIdentity, ...], cached: DailyHistory
+) -> TimeSeries:
+    bars = tuple(
+        PriceBar(candle.open_at, *cached[candle.session_date][0][1:]) for candle in required
+    )
+    return TimeSeries(symbol, BarInterval.ONE_DAY, required[-1].timezone, bars)
 
 
 def scan_cached_daily(

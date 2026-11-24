@@ -54,6 +54,15 @@ class CacheError(MarketDataError):
     """Persistent market-data storage failed."""
 
 
+class CachedChartHistoryError(Exception):
+    """A cached reference chart could not be loaded."""
+
+    def __init__(self, code: str, message: str, *, status: int = 422) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status = status
+
+
 class ScanTimeoutError(Exception):
     """Raised when a similarity request exceeds its configured execution budget."""
 

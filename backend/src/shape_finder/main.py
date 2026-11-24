@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import time, timedelta
 from typing import cast
 
 import httpx
@@ -35,6 +35,7 @@ from shape_finder.core.persistence import MarketDataRepository
 from shape_finder.core.universe import UniverseProvider, UniverseRepository
 from shape_finder.infrastructure.market_data.twelve_data import TwelveDataProvider
 from shape_finder.infrastructure.persistence.current_data_store import CurrentDataStore
+from shape_finder.infrastructure.persistence.massive_store import MassiveStore
 from shape_finder.infrastructure.persistence.sqlite_market_data import SQLiteMarketDataRepository
 
 
@@ -54,6 +55,15 @@ def create_app(
         await active_repository.initialize()
         application.state.repository = active_repository
         application.state.current_pattern_service = current_scan_service
+        application.state.massive_chart = (
+            (
+                MassiveStore(active_repository.path),
+                time.fromisoformat(active_settings.massive_publication_time_et),
+            )
+            if active_settings.current_daily_provider == "massive"
+            and isinstance(active_repository, SQLiteMarketDataRepository)
+            else None
+        )
         if current_scan_service is None and isinstance(
             active_repository, SQLiteMarketDataRepository
         ):
